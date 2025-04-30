@@ -45,6 +45,9 @@ library Reflection {
      * @param initialSupply Initial token supply
      */
     function initialize(ReflectionState storage state, uint256 initialSupply) internal {
+        // Ensure initialSupply is not zero to prevent division by zero
+        require(initialSupply > 0, "Initial supply must be greater than zero");
+        
         // Set total supply of tokens
         state.totalSupply = initialSupply;
         

@@ -340,55 +340,61 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
             return;
         }
         
+        // Cache address checks to avoid redundant operations
+        bool isMint = from == address(0);
+        bool isBurn = to == address(0);
+        bool isRealTransfer = !isMint && !isBurn;
+        bool isSenderExcluded = _isExcludedFromFee[from];
+        bool isReceiverExcluded = _isExcludedFromFee[to];
+        bool isSellToKnownDex = _isKnownDex[to];
+        
         // Set launch timestamp on first real transfer only if not explicitly launched
         // This is a fallback mechanism in case launch() wasn't called
-        if (!_isLaunched && from != address(0) && to != address(0)) {
+        if (!_isLaunched && isRealTransfer) {
             _isLaunched = true;
             _launchTimestamp = block.timestamp;
             emit TokenLaunched(_launchTimestamp);
         }
         
         // Check max transaction limit
-        if (_isMaxTxLimitEnabled &&
-            from != address(0) && // Exclude minting
-            to != address(0) &&   // Exclude burning
-            !_isExcludedFromFee[from] && // Excluded addresses can exceed limit
-            !_isExcludedFromFee[to]) {
+        if (_isMaxTxLimitEnabled && 
+            isRealTransfer && 
+            !isSenderExcluded && 
+            !isReceiverExcluded) {
             require(amount <= this.getMaxTransactionAmount(), "Transfer amount exceeds max transaction limit");
         }
         
-        // Calculate fees
-        uint16 totalFeePercent = 0;
+        // Calculate fees - clearly separate different fee types for better tracking
+        uint16 reflectionFeePercent = 0;
+        uint16 earlySellTaxPercent = 0;
         
         // Add reflection fee if applicable (excludes mint, burn, and excluded addresses)
-        if (from != address(0) && to != address(0) && 
-            !_isExcludedFromFee[from] && !_isExcludedFromFee[to]) {
-            totalFeePercent += REFLECTION_FEE;
+        if (isRealTransfer && !isSenderExcluded && !isReceiverExcluded) {
+            reflectionFeePercent = REFLECTION_FEE;
         }
         
-        // Add early sell tax if applicable (only applies to sells, not buys)
-        // We identify "sells" as transfers to known liquidity pools or routers
-        if (_isEarlySellTaxEnabled && 
-            from != address(0) && 
-            !_isExcludedFromFee[from] &&
-            _isKnownDex[to]) {  // Check if recipient is a known DEX
-            totalFeePercent += this.getEarlySellTaxFor(from);
+        // Add early sell tax if applicable (only applies to sells to DEX addresses)
+        if (_isEarlySellTaxEnabled && !isMint && !isSenderExcluded && isSellToKnownDex) {
+            earlySellTaxPercent = this.getEarlySellTaxFor(from);
         }
+        
+        // Total fee percentage is the sum of both fee types
+        uint16 totalFeePercent = reflectionFeePercent + earlySellTaxPercent;
         
         // Execute transfer with reflection mechanism
         uint256 feeTaken = _reflectionState.transfer(from, to, amount, totalFeePercent);
         
         // Emit events
-        if (totalFeePercent > 0) {
-            // Extract reflection fee and early sell tax amounts
+        if (feeTaken > 0) {
+            // Calculate the exact amount for each fee type based on percentages
+            // This ensures accurate tracking even with rounding
             uint256 reflectionFee = 0;
             uint256 earlySellTax = 0;
             
-            if (!_isExcludedFromFee[from] && !_isExcludedFromFee[to]) {
-                reflectionFee = amount * REFLECTION_FEE / 10000;
+            if (totalFeePercent > 0) {
+                // Calculate each fee proportionally to avoid rounding errors
+                reflectionFee = feeTaken * reflectionFeePercent / totalFeePercent;
                 earlySellTax = feeTaken - reflectionFee;
-            } else {
-                earlySellTax = feeTaken;
             }
             
             // Emit events for the fees taken
