@@ -1,10 +1,25 @@
 import { HardhatRuntimeEnvironment } from 'hardhat/types';
 import { ContractFactory } from 'ethers';
+import hre from 'hardhat';
 
 /**
  * Utility module for contract verification on BaseScan
  * @module verify
  */
+
+/**
+ * Simple verify function that works directly with the global hardhat environment
+ * For use in deployment scripts
+ * 
+ * @param {string} contractAddress - Address of the deployed contract
+ * @param {any[]} constructorArguments - Constructor arguments used during deployment
+ */
+export async function verify(
+  contractAddress: string,
+  constructorArguments: any[] = []
+): Promise<void> {
+  return verifyContract(hre, contractAddress, constructorArguments);
+}
 
 /**
  * Verifies a contract on BaseScan

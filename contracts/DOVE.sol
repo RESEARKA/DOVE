@@ -246,7 +246,7 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
         uint256 day1Duration,
         uint256 day2Duration,
         uint256 day3Duration
-    ) external onlyOwner {
+    ) external onlyOwner whenNotPaused {
         require(day1Duration < day2Duration, "Day 1 duration must be less than Day 2");
         require(day2Duration < day3Duration, "Day 2 duration must be less than Day 3");
         
@@ -262,7 +262,7 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
      * Can only be called by owner
      * @param newCharityWallet New address to receive charity fees
      */
-    function setCharityWallet(address newCharityWallet) external onlyOwner {
+    function setCharityWallet(address newCharityWallet) external onlyOwner whenNotPaused {
         require(newCharityWallet != address(0), "New charity wallet cannot be zero address");
         address oldCharityWallet = _charityWallet;
         _charityWallet = newCharityWallet;
@@ -280,7 +280,7 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
      * @param dexAddress Address to mark as DEX
      * @param isDex True to mark as DEX, false to remove DEX status
      */
-    function setDexStatus(address dexAddress, bool isDex) external onlyOwner {
+    function setDexStatus(address dexAddress, bool isDex) external onlyOwner whenNotPaused {
         require(dexAddress != address(0), "Cannot set zero address as DEX");
         _isKnownDex[dexAddress] = isDex;
         emit DexStatusUpdated(dexAddress, isDex);
@@ -386,14 +386,9 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
         
         // Process the transfer with fees if applicable
         if (totalFeePercent > 0) {
-            // For small fee percentages (≤1%), divide first to prevent overflow
-            uint256 feeAmount;
-            if (totalFeePercent <= 100) {
-                feeAmount = amount / 10000 * totalFeePercent;
-            } else {
-                // For larger percentages, calculate normally
-                feeAmount = amount * totalFeePercent / 10000;
-            }
+            // Calculate fee amount with improved precision to avoid rounding errors
+            // Always multiply first, then divide to maintain proper precision
+            uint256 feeAmount = amount * totalFeePercent / 10000;
             
             // Transfer amount after deducting fees
             uint256 transferAmount = amount - feeAmount;
@@ -408,13 +403,14 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
                 earlySellTax = feeAmount - charityFee;
             }
             
-            // Process ERC20 transfers
+            // Apply checks-effects-interactions pattern to prevent reentrancy
+            // First update the direct transfer (main transfer with reduced amount)
             super._update(from, to, transferAmount);
             
-            // Send charity fee to charity wallet if applicable
+            // Then process fees after primary transfer is complete
             if (charityFee > 0) {
-                super._update(from, _charityWallet, charityFee);
                 _totalCharityDonations += charityFee;
+                super._update(from, _charityWallet, charityFee);
                 emit CharityFeeCollected(charityFee);
             }
             

@@ -1,13 +1,13 @@
 # DOVE Token
 
-DOVE is an ERC-20 token built on Base L2 with reflection and early-sell taxation mechanisms.
+DOVE is an ERC-20 token built on Base L2 with charity donations and early-sell taxation mechanisms.
 
 ## Overview
 
-DOVE implements a set of taxation mechanisms to incentivize long-term holding:
-- 1% reflection tax redistributed to all holders
-- Declining early-sell tax (3% → 2% → 1% → 0%) over the first 72 hours
-- Transaction limits to prevent dumping
+DOVE implements a set of taxation mechanisms to create social impact while protecting token value:
+- 0.5% charity fee directing funds to charitable initiatives
+- Declining early-sell tax (3% → 2% → 1% → 0%) over the first 72 hours that gets burned
+- Transaction limits to prevent dumping and protect early investors
 
 ## Technical Stack
 
@@ -23,15 +23,12 @@ DOVE implements a set of taxation mechanisms to incentivize long-term holding:
 dove-token/
 ├── contracts/            # Solidity contracts
 │   ├── DOVE.sol          # Core ERC-20 token implementation
-│   ├── libraries/        # Helper libraries
-│   ├── vesting/          # Token vesting contracts
-│   ├── governance/       # Multisig and governance
+│   ├── interfaces/       # Contract interfaces
 │   └── utils/            # Utility contracts
-├── script/               # Foundry deployment scripts
-├── test/                 # Tests (Foundry)
 ├── scripts/              # Hardhat TypeScript scripts
 │   ├── deploy/           # Deployment scripts
 │   └── utils/            # Helper scripts
+├── test/                 # Tests (Foundry and TypeScript)
 ```
 
 ## Development Setup
@@ -45,45 +42,86 @@ dove-token/
    ```bash
    cp .env.example .env
    ```
-4. Update `.env` with your private key and API keys
+4. Update `.env` with your private key, API keys, and charity wallet address
 
 ## Testing
 
 ```bash
 # Run Foundry tests
-pnpm test:foundry
+forge test
+
+# Run TypeScript tests
+pnpm test
 
 # Run with gas reporting
-pnpm test:gas
+forge test --gas-report
 
 # Run slither security analysis
-pnpm slither
+slither .
 ```
 
-## Deployment
+## Deployment Process
 
-The deployment process follows these steps:
+Following the DOVE Developer Guidelines, the deployment process consists of these steps:
 
-1. Deploy core token contract:
+1. Compile & test the contracts:
    ```bash
-   pnpm deploy:sepolia  # Test deployment
-   pnpm deploy:mainnet  # Production deployment
+   forge test
    ```
 
-2. Verify contracts on BaseScan:
+2. Deploy the DOVE token specifying the charity wallet:
    ```bash
-   pnpm verify:sepolia <contract-address>
-   pnpm verify:mainnet <contract-address>
+   pnpm hardhat run scripts/deploy/dove.ts --network base
    ```
+
+3. Verify the contract on BaseScan:
+   ```bash
+   pnpm hardhat verify <DOVE_ADDRESS> <CHARITY_WALLET> --network base
+   ```
+
+4. Transfer ownership to the multisig (handled automatically in the deployment script).
+
+5. Seed LP (1.67 ETH + 10B DOVE):
+   ```bash
+   # First set the DOVE_ADDRESS and DEX_ROUTER_ADDRESS environment variables
+   export DOVE_ADDRESS=0x...
+   export DEX_ROUTER_ADDRESS=0x...
+   
+   # Then run the seeding script
+   pnpm hardhat run scripts/deploy/seedLp.ts --network base
+   ```
+
+6. Lock LP NFT using UNCX locker (to be executed manually).
+
+7. Announce contract & lock links on socials.
+
+## Key Features
+
+### Charity Fee (0.5%)
+Every transaction contributes 0.5% to the designated charity wallet, allowing DOVE to make a meaningful social impact. With $1M in daily trading volume, approximately $5,000 would be directed to charity every day.
+
+### Early-Sell Tax
+To discourage pump-and-dump behaviors, sales to DEX addresses incur a declining tax:
+- 3% for the first 24 hours after launch
+- 2% for hours 24-48
+- 1% for hours 48-72
+- 0% afterwards
+
+Early-sell taxes are burned, reducing the total supply over time.
+
+### Transaction Limits
+- 0.2% of total supply per transaction for the first 24 hours
+- 0.5% of total supply per transaction after 24 hours
+- Excludable addresses for contracts and whitelisted wallets
 
 ## Security
 
 This project implements several security features:
 - Static analysis with Slither
-- Gas optimization
-- Test coverage with Forge
-- Non-iterative reflection mechanism for gas efficiency
-- Standard OpenZeppelin contracts as base
+- Gas optimization throughout the codebase
+- Comprehensive test coverage
+- Secure fee handling mechanisms
+- Standard OpenZeppelin contracts for core functionality
 
 ## License
 
