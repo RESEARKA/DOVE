@@ -1,0 +1,44 @@
+{
+  "name": "dove-token",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:foundry": "forge test",
+    "test:gas": "forge test --gas-report",
+    "lint": "pnpm lint:sol && pnpm lint:ts",
+    "lint:sol": "solhint 'contracts/**/*.sol'",
+    "lint:ts": "eslint . --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write 'contracts/**/*.sol' '**/*.ts'",
+    "coverage": "hardhat coverage",
+    "slither": "slither .",
+    "deploy:sepolia": "hardhat run scripts/deploy/dove.ts --network baseSepolia",
+    "deploy:mainnet": "hardhat run scripts/deploy/dove.ts --network base",
+    "verify:sepolia": "hardhat verify --network baseSepolia",
+    "verify:mainnet": "hardhat verify --network base"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.1"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-foundry": "^1.1.1",
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@nomicfoundation/hardhat-verify": "^2.0.3",
+    "@types/chai": "^4.3.11",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.5",
+    "@typescript-eslint/eslint-plugin": "^6.19.1",
+    "@typescript-eslint/parser": "^6.19.1",
+    "chai": "^4.4.0",
+    "dotenv": "^16.3.1",
+    "eslint": "^8.56.0",
+    "hardhat": "^2.22.1",
+    "prettier": "^3.2.4",
+    "prettier-plugin-solidity": "^1.3.1",
+    "solhint": "^4.1.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

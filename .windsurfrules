@@ -1,0 +1,136 @@
+# DOVE Developer Guidelines  
+*(v 1.0 – April 2025)*  
+
+These rules set the **coding, testing, and deployment standards** for every repo in the DOVE stack—Solidity contracts, TypeScript/Hardhat scripts, and the light React dApp. Keep them close while you work.
+
+---
+
+## 1 · Languages & Toolchain
+
+| Layer | Primary Tech | Versions / Notes |
+|-------|--------------|------------------|
+| Smart-contracts | **Solidity 0.8.24** | Compiled with Foundry **forge 0.2.x** and Hardhat **2.22+**; use OpenZeppelin **v5** libraries. |
+| Scripts & tooling | **TypeScript 5** | Node 20 LTS; ES 2022 modules; Hardhat task + plugin ecosystem. |
+| Front-end (optional) | **React 18 + Next.js 14 (App Router)** | Client-side only where Web3 is required; otherwise Server Components. |
+| Styling | **Tailwind 3 + Shadcn UI** | Dark-mode first, responsive. |
+| Testing | **Foundry forge-tests** for Solidity, **Vitest** for TS, **playwright** for e2e dApp checks. |
+
+---
+
+## 2 · Smart-contract Style
+
+* **Modular > monolith**  
+  * `DOVE.sol` owns ERC-20 logic + taxes only.  
+  * Vesting, timelock, and paymaster live in dedicated contracts.  
+
+* **Patterns**  
+  * Prefer immutable state, `immutable` variables, and constructor injection.  
+  * No proxy upgrades—contracts are final; only parameter switches (`setTaxRate`, `pause`) are owner-gated.  
+  * Use **function modifiers** for repetitive guards (`whenNotPaused`, `onlyOwner`).  
+
+* **Naming**  
+  * State variables in `camelCase`; constants in `UPPER_CASE`; functions in `camelCase`.  
+  * Boolean flags begin with auxiliary verbs: `isPaused`, `hasClaimed`.  
+
+* **Libraries**  
+  * Always pull from OpenZeppelin v5—never reinvent ERC-20, AccessControl, or SafeMath.  
+  * Reflection math in an internal `Reflection` library for readability.  
+
+* **Events**  
+  * Emit on every external state change (`TaxRateUpdated`, `ReflectionTaken`, `EarlySellTaxDisabled`).  
+
+---
+
+## 3 · TypeScript / Hardhat
+
+* **File layout**
+
+```
+/contracts            Solidity sources
+/scripts
+  ├─ deploy/
+  ├─ tasks/           hardhat <task>
+  └─ utils/           helpers (ABI fetch, Etherscan verify)
+/test                 forge & Vitest
+```
+
+* **Style**
+
+```ts
+// scripts/deploy/dove.ts
+import { ethers } from "hardhat";
+
+export async function deployDove() {
+  const [deployer] = await ethers.getSigners();
+  const Dove = await ethers.getContractFactory("DOVE");
+  const dove = await Dove.deploy();
+  await dove.deployed();
+  console.log("DOVE deployed:", dove.address);
+}
+```
+
+  * Use **named exports**; no default exports.  
+  * Interfaces > type aliases; avoid enums—use string-literal maps.  
+  * Async/await everywhere; never mix `.then()` with `await`.  
+
+---
+
+## 4 · React / dApp (optional extras)
+
+* **Keep client code thin.**  
+  * Only wallet connect, claim, and voting screens are client components.  
+  * All read-only calls handled in Server Components (SSR).  
+
+* **UI conventions**  
+  * Components live under `src/components/<feature-name>/` (kebab-case dirs).  
+  * One file = one component; sub-components in a nested folder.  
+  * Tailwind classes follow mobile-first order: `p-4 sm:p-6 lg:p-8`.  
+
+* **Performance**  
+  * Wrap every client component in `<Suspense fallback={<Spinner/>}>`.  
+  * Lazy-load charts, NFT galleries, or any non-critical modules.  
+
+---
+
+## 5 · Security First
+
+1. **Static analysis** – `forge test -vvvv` and `slither .`, no warnings permitted.  
+2. **Gas snapshots** – Track with Foundry’s `gas-snapshots`; regressions gate merges.  
+3. **Role separation** – Deploy from cold wallet; owner transferred to 3-of-5 multisig before TGE.  
+4. **No unchecked low-level calls** – Always use `address(function).call` wrappers with return-value check.  
+
+---
+
+## 6 · Commit / PR Rules
+
+| Step | Requirement |
+|------|-------------|
+| **Pre-commit** | `pnpm lint && pnpm typecheck && pnpm test` must pass. |
+| **PR body** | Link to GitHub issue ⟨#ID⟩ + Etherscan tx (if on testnet). |
+| **Review** | Minimum one other dev; sign off after diff + tests read. |
+| **Merge** | Only squash-and-merge. Commit message auto-generates changelog entry. |
+
+---
+
+## 7 · Deployment Flow (Base mainnet)
+
+1. Compile & run Forge tests: `forge test`.  
+2. Run TypeScript Hardhat deploy script: `pnpm hardhat run scripts/deploy/dove.ts --network base`.  
+3. Verify on BaseScan: `pnpm hardhat verify <address>`.  
+4. Transfer ownership to multisig.  
+5. Seed LP via script `seedLp.ts` (adds 10 B DOVE + 1.67 ETH).  
+6. Lock LP NFT using `uncxLocker.lock()`; tx hash posted in #launch-logs.  
+7. Announce contract & lock links on socials.
+
+---
+
+## 8 · Communication & Check-ins
+
+* **Ask first** – If specs are unclear, open a GitHub Discussion or ping in **#dev-sync**.  
+* **No silent scope-creep** – Every new feature needs an issue + spec review.  
+* **CI green or it didn’t happen** – red pipelines block deploys.  
+
+---
+
+*These guidelines are binding for all contributors to the DOVE repositories.  
+Follow them precisely—security, clarity, and maintainability keep our token (and our users) safe.*
