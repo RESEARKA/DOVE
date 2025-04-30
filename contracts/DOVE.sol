@@ -6,24 +6,21 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
-import "./libraries/Reflection.sol";
 import "./interfaces/IDOVE.sol";
 
 /**
  * @title DOVE Token
- * @dev Implementation of the DOVE token with reflection tax mechanism and early-sell tax
- * Uses non-iterative reflection distribution for gas efficiency
+ * @dev Implementation of the DOVE token with charity fee and early-sell tax mechanisms
  */
 contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
-    using Reflection for Reflection.ReflectionState;
     
     // ================ Constants ================
     
     // Base supply: 100 billion tokens with 18 decimals
     uint256 private constant TOTAL_SUPPLY = 100_000_000_000 * 1e18;
     
-    // Reflection fee: 1% of transactions redistributed to holders
-    uint16 private constant REFLECTION_FEE = 100; // 100 = 1.00%
+    // Charity fee: 0.5% of transactions sent to charity wallet
+    uint16 private constant CHARITY_FEE = 50; // 50 = 0.50%
     
     // Early sell tax rates (in basis points)
     uint16 private constant TAX_RATE_DAY_1 = 300; // 3% for first 24h
@@ -35,9 +32,6 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
     uint256 private constant MAX_TX_AFTER_24H = TOTAL_SUPPLY * 5 / 1000; // 0.5%
     
     // ================ State Variables ================
-    
-    // Reflection mechanism state
-    Reflection.ReflectionState private _reflectionState;
     
     // Timestamp of first transfer (launch time)
     uint256 private _launchTimestamp;
@@ -60,58 +54,53 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
     uint256 private _taxDurationDay2 = 2 days;
     uint256 private _taxDurationDay3 = 3 days;
     
+    // Charity wallet to receive fee
+    address private _charityWallet;
+    
+    // Total accumulated charity donations
+    uint256 private _totalCharityDonations;
+    
     // ================ Events ================
     
     event DexStatusUpdated(address indexed dexAddress, bool isMarkedAsDex);
     event TokenLaunched(uint256 timestamp);
+    event TaxDurationsUpdated(uint256 day1, uint256 day2, uint256 day3);
+    event CharityFeeCollected(uint256 amount);
+    event EarlySellTaxCollected(address indexed account, uint256 amount);
+    event CharityWalletUpdated(address indexed oldWallet, address indexed newWallet);
     event ExcludeFromFee(address indexed account, bool excluded);
     event EarlySellTaxDisabled();
     event MaxTxLimitDisabled();
-    event ReflectionFeeCollected(uint256 amount);
-    event EarlySellTaxCollected(address indexed account, uint256 amount);
-    event TaxDurationsUpdated(uint256 day1, uint256 day2, uint256 day3);
     
     // ================ Constructor ================
     
     /**
-     * @dev Constructor initializes the DOVE token and reflection mechanism
+     * @dev Constructor initializes the DOVE token
+     * @param initialCharityWallet Address to receive charity fees
      */
-    constructor() ERC20("DOVE", "DOVE") ERC20Permit("DOVE") Ownable(msg.sender) {
-        // Initialize reflection state with total supply
-        _reflectionState.initialize(TOTAL_SUPPLY);
+    constructor(address initialCharityWallet) ERC20("DOVE", "DOVE") ERC20Permit("DOVE") Ownable(msg.sender) {
+        require(initialCharityWallet != address(0), "Charity wallet cannot be zero address");
+        
+        // Set charity wallet
+        _charityWallet = initialCharityWallet;
         
         // Mint total supply to deployer
-        _reflectionState.reflectionBalance[msg.sender] = _reflectionState.reflectionTotal;
+        _mint(msg.sender, TOTAL_SUPPLY);
         
-        // Exclude owner and token contract from fees
+        // Exclude owner, token contract, and charity wallet from fees
         _isExcludedFromFee[owner()] = true;
         _isExcludedFromFee[address(this)] = true;
-        
-        // Emit initial transfer event (from zero address)
-        emit Transfer(address(0), msg.sender, TOTAL_SUPPLY);
+        _isExcludedFromFee[initialCharityWallet] = true;
     }
     
     // ================ Public View Functions ================
     
     /**
-     * @dev Override ERC20 balanceOf to use reflection-based balance
+     * @dev Returns the current charity fee percentage
+     * @return Fee percentage where 100 = 1%
      */
-    function balanceOf(address account) public view override returns (uint256) {
-        return _reflectionState.balanceOf(account);
-    }
-    
-    /**
-     * @dev Returns total supply (constant value)
-     */
-    function totalSupply() public pure override returns (uint256) {
-        return TOTAL_SUPPLY;
-    }
-    
-    /**
-     * @dev See {IDOVE-getReflectionFee}
-     */
-    function getReflectionFee() external pure returns (uint16) {
-        return REFLECTION_FEE;
+    function getCharityFee() external pure returns (uint16) {
+        return CHARITY_FEE;
     }
     
     /**
@@ -196,6 +185,22 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
         return _isKnownDex[account];
     }
     
+    /**
+     * @dev Returns the address of the charity wallet
+     * @return Address of the charity wallet
+     */
+    function getCharityWallet() external view returns (address) {
+        return _charityWallet;
+    }
+    
+    /**
+     * @dev Returns the total amount of tokens donated to charity
+     * @return Total amount donated
+     */
+    function getTotalCharityDonations() external view returns (uint256) {
+        return _totalCharityDonations;
+    }
+    
     // ================ External Owner Functions ================
     
     /**
@@ -219,46 +224,6 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
     }
     
     /**
-     * @dev Exclude account from reflection mechanism
-     * Can only be called by owner
-     * @param account Address to exclude from reflections
-     */
-    function excludeFromReflection(address account) external onlyOwner {
-        _reflectionState.excludeAccount(account);
-    }
-    
-    /**
-     * @dev Include previously excluded account in reflection mechanism
-     * Can only be called by owner
-     * @param account Address to include in reflections
-     */
-    function includeInReflection(address account) external onlyOwner {
-        _reflectionState.includeAccount(account);
-    }
-    
-    /**
-     * @dev See {IDOVE-disableEarlySellTax}
-     * Can only be called by owner
-     * This action is irreversible
-     */
-    function disableEarlySellTax() external onlyOwner {
-        require(_isEarlySellTaxEnabled, "Early sell tax already disabled");
-        _isEarlySellTaxEnabled = false;
-        emit EarlySellTaxDisabled();
-    }
-    
-    /**
-     * @dev See {IDOVE-disableMaxTxLimit}
-     * Can only be called by owner
-     * This action is irreversible
-     */
-    function disableMaxTxLimit() external onlyOwner {
-        require(_isMaxTxLimitEnabled, "Max transaction limit already disabled");
-        _isMaxTxLimitEnabled = false;
-        emit MaxTxLimitDisabled();
-    }
-    
-    /**
      * @dev Officially launches the token, enabling early-sell tax and transaction limits
      * Can only be called by owner
      * Can only be called once
@@ -268,19 +233,6 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
         _isLaunched = true;
         _launchTimestamp = block.timestamp;
         emit TokenLaunched(_launchTimestamp);
-    }
-    
-    /**
-     * @dev Sets the DEX status of an address
-     * Used to properly identify sell transactions for early-sell tax
-     * Can only be called by owner
-     * @param dexAddress Address to mark as DEX
-     * @param isDex True to mark as DEX, false to remove DEX status
-     */
-    function setDexStatus(address dexAddress, bool isDex) external onlyOwner {
-        require(dexAddress != address(0), "Cannot set zero address as DEX");
-        _isKnownDex[dexAddress] = isDex;
-        emit DexStatusUpdated(dexAddress, isDex);
     }
     
     /**
@@ -306,6 +258,35 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
     }
     
     /**
+     * @dev Updates the charity wallet address
+     * Can only be called by owner
+     * @param newCharityWallet New address to receive charity fees
+     */
+    function setCharityWallet(address newCharityWallet) external onlyOwner {
+        require(newCharityWallet != address(0), "New charity wallet cannot be zero address");
+        address oldCharityWallet = _charityWallet;
+        _charityWallet = newCharityWallet;
+        
+        // Exclude new charity wallet from fees
+        _isExcludedFromFee[newCharityWallet] = true;
+        
+        emit CharityWalletUpdated(oldCharityWallet, newCharityWallet);
+    }
+    
+    /**
+     * @dev Sets the DEX status of an address
+     * Used to properly identify sell transactions for early-sell tax
+     * Can only be called by owner
+     * @param dexAddress Address to mark as DEX
+     * @param isDex True to mark as DEX, false to remove DEX status
+     */
+    function setDexStatus(address dexAddress, bool isDex) external onlyOwner {
+        require(dexAddress != address(0), "Cannot set zero address as DEX");
+        _isKnownDex[dexAddress] = isDex;
+        emit DexStatusUpdated(dexAddress, isDex);
+    }
+    
+    /**
      * @dev Pause all token transfers
      * Can only be called by owner
      */
@@ -321,10 +302,32 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
         _unpause();
     }
     
+    /**
+     * @dev See {IDOVE-disableEarlySellTax}
+     * Can only be called by owner
+     * This action is irreversible
+     */
+    function disableEarlySellTax() external onlyOwner {
+        require(_isEarlySellTaxEnabled, "Early sell tax already disabled");
+        _isEarlySellTaxEnabled = false;
+        emit EarlySellTaxDisabled();
+    }
+    
+    /**
+     * @dev See {IDOVE-disableMaxTxLimit}
+     * Can only be called by owner
+     * This action is irreversible
+     */
+    function disableMaxTxLimit() external onlyOwner {
+        require(_isMaxTxLimitEnabled, "Max transaction limit already disabled");
+        _isMaxTxLimitEnabled = false;
+        emit MaxTxLimitDisabled();
+    }
+    
     // ================ Internal Functions ================
     
     /**
-     * @dev Override _update function to apply reflection tax and transaction limits
+     * @dev Override _update function to apply charity fee and transaction limits
      * @param from Sender address
      * @param to Recipient address
      * @param amount Amount of tokens to transfer
@@ -365,12 +368,12 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
         }
         
         // Calculate fees - clearly separate different fee types for better tracking
-        uint16 reflectionFeePercent = 0;
+        uint16 charityFeePercent = 0;
         uint16 earlySellTaxPercent = 0;
         
-        // Add reflection fee if applicable (excludes mint, burn, and excluded addresses)
+        // Apply charity fee if applicable (excludes mint, burn, and excluded addresses)
         if (isRealTransfer && !isSenderExcluded && !isReceiverExcluded) {
-            reflectionFeePercent = REFLECTION_FEE;
+            charityFeePercent = CHARITY_FEE;
         }
         
         // Add early sell tax if applicable (only applies to sells to DEX addresses)
@@ -379,35 +382,50 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
         }
         
         // Total fee percentage is the sum of both fee types
-        uint16 totalFeePercent = reflectionFeePercent + earlySellTaxPercent;
+        uint16 totalFeePercent = charityFeePercent + earlySellTaxPercent;
         
-        // Execute transfer with reflection mechanism
-        uint256 feeTaken = _reflectionState.transfer(from, to, amount, totalFeePercent);
-        
-        // Emit events
-        if (feeTaken > 0) {
-            // Calculate the exact amount for each fee type based on percentages
-            // This ensures accurate tracking even with rounding
-            uint256 reflectionFee = 0;
+        // Process the transfer with fees if applicable
+        if (totalFeePercent > 0) {
+            // For small fee percentages (≤1%), divide first to prevent overflow
+            uint256 feeAmount;
+            if (totalFeePercent <= 100) {
+                feeAmount = amount / 10000 * totalFeePercent;
+            } else {
+                // For larger percentages, calculate normally
+                feeAmount = amount * totalFeePercent / 10000;
+            }
+            
+            // Transfer amount after deducting fees
+            uint256 transferAmount = amount - feeAmount;
+            
+            // Calculate exact amount for each fee type based on percentages
+            uint256 charityFee = 0;
             uint256 earlySellTax = 0;
             
             if (totalFeePercent > 0) {
                 // Calculate each fee proportionally to avoid rounding errors
-                reflectionFee = feeTaken * reflectionFeePercent / totalFeePercent;
-                earlySellTax = feeTaken - reflectionFee;
+                charityFee = feeAmount * charityFeePercent / totalFeePercent;
+                earlySellTax = feeAmount - charityFee;
             }
             
-            // Emit events for the fees taken
-            if (reflectionFee > 0) {
-                emit ReflectionFeeCollected(reflectionFee);
+            // Process ERC20 transfers
+            super._update(from, to, transferAmount);
+            
+            // Send charity fee to charity wallet if applicable
+            if (charityFee > 0) {
+                super._update(from, _charityWallet, charityFee);
+                _totalCharityDonations += charityFee;
+                emit CharityFeeCollected(charityFee);
             }
             
+            // Early sell tax is automatically burned
             if (earlySellTax > 0) {
+                super._update(from, address(0), earlySellTax); // Burn early sell tax
                 emit EarlySellTaxCollected(from, earlySellTax);
             }
+        } else {
+            // No fees, do regular transfer
+            super._update(from, to, amount);
         }
-        
-        // Skip ERC20 bookkeeping since reflection handles balances
-        emit Transfer(from, to, amount);
     }
 }

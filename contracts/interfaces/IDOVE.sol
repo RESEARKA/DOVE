@@ -3,14 +3,14 @@ pragma solidity 0.8.24;
 
 /**
  * @title IDOVE
- * @dev Interface for the DOVE token with reflection and early-sell tax functionality
+ * @dev Interface for the DOVE token with charity fee and early-sell tax functionality
  */
 interface IDOVE {
     /**
-     * @dev Returns the current reflection fee percentage (in basis points)
-     * @return Fee percentage where 100 = 1%
+     * @dev Returns the current charity fee percentage (in basis points)
+     * @return Fee percentage where 50 = 0.5%
      */
-    function getReflectionFee() external view returns (uint16);
+    function getCharityFee() external view returns (uint16);
 
     /**
      * @dev Returns the current early-sell tax percentage for a specific account
@@ -61,11 +61,24 @@ interface IDOVE {
      * @return Timestamp in seconds
      */
     function getLaunchTimestamp() external view returns (uint256);
+    
+    /**
+     * @dev Returns the address of the charity wallet
+     * @return Address of the charity wallet receiving fees
+     */
+    function getCharityWallet() external view returns (address);
+    
+    /**
+     * @dev Returns the total amount of tokens donated to charity
+     * @return Total amount donated
+     */
+    function getTotalCharityDonations() external view returns (uint256);
 
     // Events
-    event ReflectionFeeCollected(uint256 tFee);
+    event CharityFeeCollected(uint256 amount);
     event EarlySellTaxCollected(address indexed seller, uint256 taxAmount);
     event ExcludeFromFee(address indexed account, bool excluded);
     event MaxTxLimitDisabled();
     event EarlySellTaxDisabled();
+    event CharityWalletUpdated(address indexed oldWallet, address indexed newWallet);
 }
