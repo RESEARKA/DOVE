@@ -17,7 +17,10 @@
     "deploy:sepolia": "hardhat run scripts/deploy/dove.ts --network baseSepolia",
     "deploy:mainnet": "hardhat run scripts/deploy/dove.ts --network base",
     "verify:sepolia": "hardhat verify --network baseSepolia",
-    "verify:mainnet": "hardhat verify --network base"
+    "verify:mainnet": "hardhat verify --network base",
+    "test:deployment": "hardhat run scripts/test-deployment.ts --network baseSepolia",
+    "seed:sepolia": "hardhat run scripts/deploy/seedLp.ts --network baseSepolia",
+    "seed:mainnet": "hardhat run scripts/deploy/seedLp.ts --network base"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.0.1"
