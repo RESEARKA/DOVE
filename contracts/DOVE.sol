@@ -65,30 +65,24 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
     event DexStatusUpdated(address indexed dexAddress, bool isMarkedAsDex);
     event TokenLaunched(uint256 timestamp);
     event TaxDurationsUpdated(uint256 day1, uint256 day2, uint256 day3);
-    event CharityFeeCollected(uint256 amount);
-    event EarlySellTaxCollected(address indexed account, uint256 amount);
-    event CharityWalletUpdated(address indexed oldWallet, address indexed newWallet);
-    event ExcludeFromFee(address indexed account, bool excluded);
-    event EarlySellTaxDisabled();
-    event MaxTxLimitDisabled();
     
     // ================ Constructor ================
     
     /**
-     * @dev Constructor initializes the DOVE token
+     * @dev Constructor initializes the DOVE token with charity wallet
      * @param initialCharityWallet Address to receive charity fees
      */
-    constructor(address initialCharityWallet) ERC20("DOVE", "DOVE") ERC20Permit("DOVE") Ownable(msg.sender) {
+    constructor(address initialCharityWallet) ERC20("DOVE", "DOVE") ERC20Permit("DOVE") Ownable() {
         require(initialCharityWallet != address(0), "Charity wallet cannot be zero address");
         
         // Set charity wallet
         _charityWallet = initialCharityWallet;
         
         // Mint total supply to deployer
-        _mint(msg.sender, TOTAL_SUPPLY);
+        _mint(_msgSender(), TOTAL_SUPPLY);
         
         // Exclude owner, token contract, and charity wallet from fees
-        _isExcludedFromFee[owner()] = true;
+        _isExcludedFromFee[_msgSender()] = true;
         _isExcludedFromFee[address(this)] = true;
         _isExcludedFromFee[initialCharityWallet] = true;
     }
@@ -327,19 +321,19 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
     // ================ Internal Functions ================
     
     /**
-     * @dev Override _update function to apply charity fee and transaction limits
+     * @dev Override _transfer function to apply charity fee and transaction limits
      * @param from Sender address
      * @param to Recipient address
      * @param amount Amount of tokens to transfer
      */
-    function _update(
+    function _transfer(
         address from,
         address to,
         uint256 amount
-    ) internal override whenNotPaused nonReentrant {
+    ) internal virtual override whenNotPaused nonReentrant {
         // Skip all checks for zero transfers
         if (amount == 0) {
-            super._update(from, to, 0);
+            super._transfer(from, to, amount);
             return;
         }
         
@@ -405,23 +399,23 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
             
             // Apply checks-effects-interactions pattern to prevent reentrancy
             // First update the direct transfer (main transfer with reduced amount)
-            super._update(from, to, transferAmount);
+            super._transfer(from, to, transferAmount);
             
             // Then process fees after primary transfer is complete
             if (charityFee > 0) {
                 _totalCharityDonations += charityFee;
-                super._update(from, _charityWallet, charityFee);
+                super._transfer(from, _charityWallet, charityFee);
                 emit CharityFeeCollected(charityFee);
             }
             
             // Early sell tax is automatically burned
             if (earlySellTax > 0) {
-                super._update(from, address(0), earlySellTax); // Burn early sell tax
+                super._transfer(from, address(0), earlySellTax); // Burn early sell tax
                 emit EarlySellTaxCollected(from, earlySellTax);
             }
         } else {
             // No fees, do regular transfer
-            super._update(from, to, amount);
+            super._transfer(from, to, amount);
         }
     }
 }

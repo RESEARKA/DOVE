@@ -22,9 +22,6 @@
     "seed:sepolia": "hardhat run scripts/deploy/seedLp.ts --network baseSepolia",
     "seed:mainnet": "hardhat run scripts/deploy/seedLp.ts --network base"
   },
-  "dependencies": {
-    "@openzeppelin/contracts": "^5.0.1"
-  },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^3.0.8",
     "@nomicfoundation/hardhat-foundry": "^1.1.1",
@@ -45,5 +42,8 @@
     "solhint": "^4.1.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.9.3"
   }
 }
