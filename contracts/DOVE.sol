@@ -2,30 +2,21 @@
 pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
-import "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
 import "./interfaces/IDOVE.sol";
+import "./DOVEFees.sol";
+import "./DOVEAdmin.sol";
 
 /**
  * @title DOVE Token
  * @dev Implementation of the DOVE token with charity fee and early-sell tax mechanisms
  */
-contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
+contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE {
     
     // ================ Constants ================
     
     // Base supply: 100 billion tokens with 18 decimals
     uint256 private constant TOTAL_SUPPLY = 100_000_000_000 * 1e18;
-    
-    // Charity fee: 0.5% of transactions sent to charity wallet
-    uint16 private constant CHARITY_FEE = 50; // 50 = 0.50%
-    
-    // Early sell tax rates (in basis points)
-    uint16 private constant TAX_RATE_DAY_1 = 300; // 3% for first 24h
-    uint16 private constant TAX_RATE_DAY_2 = 200; // 2% for 24-48h
-    uint16 private constant TAX_RATE_DAY_3 = 100; // 1% for 48-72h
     
     // Transaction limits
     uint256 private constant MAX_TX_INITIAL = TOTAL_SUPPLY * 2 / 1000; // 0.2%
@@ -33,38 +24,11 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
     
     // ================ State Variables ================
     
-    // Timestamp of first transfer (launch time)
-    uint256 private _launchTimestamp;
+    // Fee management module - handles charity fee and early sell tax
+    DOVEFees public immutable feeManager;
     
-    // Flag to indicate if token is officially launched
-    bool private _isLaunched = false;
-    
-    // Excluded from fee addresses
-    mapping(address => bool) private _isExcludedFromFee;
-    
-    // Flags to control features
-    bool private _isEarlySellTaxEnabled = true;
-    bool private _isMaxTxLimitEnabled = true;
-    
-    // DEX identification for sell tax application
-    mapping(address => bool) private _isKnownDex;
-    
-    // Configurable tax rate durations (in seconds)
-    uint256 private _taxDurationDay1 = 1 days;
-    uint256 private _taxDurationDay2 = 2 days;
-    uint256 private _taxDurationDay3 = 3 days;
-    
-    // Charity wallet to receive fee
-    address private _charityWallet;
-    
-    // Total accumulated charity donations
-    uint256 private _totalCharityDonations;
-    
-    // ================ Events ================
-    
-    event DexStatusUpdated(address indexed dexAddress, bool isMarkedAsDex);
-    event TokenLaunched(uint256 timestamp);
-    event TaxDurationsUpdated(uint256 day1, uint256 day2, uint256 day3);
+    // Admin functionality module - handles owner controls
+    DOVEAdmin public immutable adminManager;
     
     // ================ Constructor ================
     
@@ -72,250 +36,131 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
      * @dev Constructor initializes the DOVE token with charity wallet
      * @param initialCharityWallet Address to receive charity fees
      */
-    constructor(address initialCharityWallet) ERC20("DOVE", "DOVE") ERC20Permit("DOVE") Ownable() {
+    constructor(address initialCharityWallet) ERC20("DOVE", "DOVE") ERC20Permit("DOVE") {
         require(initialCharityWallet != address(0), "Charity wallet cannot be zero address");
         
-        // Set charity wallet
-        _charityWallet = initialCharityWallet;
+        // Set up fee management module
+        feeManager = new DOVEFees(initialCharityWallet);
+        
+        // Set up admin module
+        adminManager = new DOVEAdmin(feeManager);
+        
+        // Transfer ownership of modules to token deployer
+        feeManager.transferOwnership(msg.sender);
+        adminManager.transferOwnership(msg.sender);
         
         // Mint total supply to deployer
-        _mint(_msgSender(), TOTAL_SUPPLY);
+        _mint(msg.sender, TOTAL_SUPPLY);
         
         // Exclude owner, token contract, and charity wallet from fees
-        _isExcludedFromFee[_msgSender()] = true;
-        _isExcludedFromFee[address(this)] = true;
-        _isExcludedFromFee[initialCharityWallet] = true;
+        feeManager._setExcludedFromFee(msg.sender, true);
+        feeManager._setExcludedFromFee(address(this), true);
+        feeManager._setExcludedFromFee(initialCharityWallet, true);
     }
     
-    // ================ Public View Functions ================
-    
-    /**
-     * @dev Returns the current charity fee percentage
-     * @return Fee percentage where 100 = 1%
-     */
-    function getCharityFee() external pure returns (uint16) {
-        return CHARITY_FEE;
-    }
-    
-    /**
-     * @dev See {IDOVE-getEarlySellTaxFor}
-     */
-    function getEarlySellTaxFor(address account) external view returns (uint16) {
-        // No early-sell tax for excluded accounts or if disabled
-        if (!_isEarlySellTaxEnabled || _isExcludedFromFee[account]) {
-            return 0;
-        }
-        
-        // If launch hasn't happened yet, return 0
-        if (_launchTimestamp == 0) {
-            return 0;
-        }
-        
-        // Calculate time since launch
-        uint256 timeSinceLaunch = block.timestamp - _launchTimestamp;
-        
-        // Apply different tax rates based on time since launch
-        if (timeSinceLaunch < _taxDurationDay1) {
-            return TAX_RATE_DAY_1;
-        } else if (timeSinceLaunch < _taxDurationDay2) {
-            return TAX_RATE_DAY_2;
-        } else if (timeSinceLaunch < _taxDurationDay3) {
-            return TAX_RATE_DAY_3;
-        } else {
-            return 0;
-        }
-    }
-    
-    /**
-     * @dev See {IDOVE-isExcludedFromFee}
-     */
-    function isExcludedFromFee(address account) external view returns (bool) {
-        return _isExcludedFromFee[account];
-    }
+    // ================ External View Functions ================
     
     /**
      * @dev See {IDOVE-getMaxTransactionAmount}
      */
     function getMaxTransactionAmount() external view returns (uint256) {
-        // If max tx limit is disabled, return max uint256
-        if (!_isMaxTxLimitEnabled) {
+        // Early check - if max tx limit is disabled, return max uint256
+        if (!adminManager.isMaxTxLimitEnabled()) {
             return type(uint256).max;
         }
         
-        // If launch hasn't happened yet, return initial limit
-        if (_launchTimestamp == 0) {
+        // If token is not launched yet, use initial limit
+        if (!feeManager.isLaunched()) {
             return MAX_TX_INITIAL;
         }
         
-        // After 24h, use increased limit
-        if (block.timestamp - _launchTimestamp > 1 days) {
+        // Calculate time elapsed since launch
+        uint256 timeElapsed = block.timestamp - feeManager.getLaunchTimestamp();
+        
+        // After 24 hours, use higher limit
+        if (timeElapsed >= 1 days) {
             return MAX_TX_AFTER_24H;
-        } else {
-            return MAX_TX_INITIAL;
         }
+        
+        // Default to initial limit
+        return MAX_TX_INITIAL;
     }
     
     /**
-     * @dev See {IDOVE-getLaunchTimestamp}
+     * @dev See {IDOVE-getCharityFee} - delegated to fee manager
      */
-    function getLaunchTimestamp() external view returns (uint256) {
-        return _launchTimestamp;
+    function getCharityFee() external view returns (uint16) {
+        return feeManager.getCharityFee();
     }
     
     /**
-     * @dev Returns true if token has been officially launched
-     * @return True if token is launched
-     */
-    function isLaunched() public view returns (bool) {
-        return _isLaunched;
-    }
-    
-    /**
-     * @dev Returns true if the address is a known DEX (liquidity pool or router)
-     * @param account Address to check
-     * @return True if address is a known DEX
-     */
-    function isKnownDex(address account) public view returns (bool) {
-        return _isKnownDex[account];
-    }
-    
-    /**
-     * @dev Returns the address of the charity wallet
-     * @return Address of the charity wallet
+     * @dev See {IDOVE-getCharityWallet} - delegated to fee manager
      */
     function getCharityWallet() external view returns (address) {
-        return _charityWallet;
+        return feeManager.getCharityWallet();
     }
     
     /**
-     * @dev Returns the total amount of tokens donated to charity
-     * @return Total amount donated
+     * @dev See {IDOVE-getLaunchTimestamp} - delegated to fee manager
+     */
+    function getLaunchTimestamp() external view returns (uint256) {
+        return feeManager.getLaunchTimestamp();
+    }
+    
+    /**
+     * @dev See {IDOVE-getTotalCharityDonations} - delegated to fee manager
      */
     function getTotalCharityDonations() external view returns (uint256) {
-        return _totalCharityDonations;
-    }
-    
-    // ================ External Owner Functions ================
-    
-    /**
-     * @dev See {IDOVE-excludeFromFee}
-     * Can only be called by owner
-     */
-    function excludeFromFee(address account) external onlyOwner {
-        require(!_isExcludedFromFee[account], "Account already excluded from fee");
-        _isExcludedFromFee[account] = true;
-        emit ExcludeFromFee(account, true);
+        return feeManager.getTotalCharityDonations();
     }
     
     /**
-     * @dev See {IDOVE-includeInFee}
-     * Can only be called by owner
+     * @dev See {IDOVE-isLaunched} - delegated to fee manager
      */
-    function includeInFee(address account) external onlyOwner {
-        require(_isExcludedFromFee[account], "Account already included in fee");
-        _isExcludedFromFee[account] = false;
-        emit ExcludeFromFee(account, false);
+    function isLaunched() external view returns (bool) {
+        return feeManager.isLaunched();
     }
     
     /**
-     * @dev Officially launches the token, enabling early-sell tax and transaction limits
-     * Can only be called by owner
-     * Can only be called once
+     * @dev See {IDOVE-isEarlySellTaxEnabled} - delegated to fee manager
      */
-    function launch() external onlyOwner {
-        require(!_isLaunched, "Token already launched");
-        _isLaunched = true;
-        _launchTimestamp = block.timestamp;
-        emit TokenLaunched(_launchTimestamp);
+    function isEarlySellTaxEnabled() external view returns (bool) {
+        return feeManager.isEarlySellTaxEnabled();
     }
     
     /**
-     * @dev Updates the durations for early-sell tax rates
-     * Can only be called by owner
-     * @param day1Duration Duration in seconds for first tax rate (TAX_RATE_DAY_1)
-     * @param day2Duration Duration in seconds for second tax rate (TAX_RATE_DAY_2)
-     * @param day3Duration Duration in seconds for third tax rate (TAX_RATE_DAY_3)
+     * @dev See {IDOVE-isExcludedFromFee} - delegated to fee manager
      */
-    function updateTaxRateDurations(
-        uint256 day1Duration,
-        uint256 day2Duration,
-        uint256 day3Duration
-    ) external onlyOwner whenNotPaused {
-        require(day1Duration < day2Duration, "Day 1 duration must be less than Day 2");
-        require(day2Duration < day3Duration, "Day 2 duration must be less than Day 3");
-        
-        _taxDurationDay1 = day1Duration;
-        _taxDurationDay2 = day2Duration;
-        _taxDurationDay3 = day3Duration;
-        
-        emit TaxDurationsUpdated(day1Duration, day2Duration, day3Duration);
+    function isExcludedFromFee(address account) external view returns (bool) {
+        return feeManager.isExcludedFromFee(account);
     }
     
     /**
-     * @dev Updates the charity wallet address
-     * Can only be called by owner
-     * @param newCharityWallet New address to receive charity fees
+     * @dev See {IDOVE-isKnownDex} - delegated to fee manager
      */
-    function setCharityWallet(address newCharityWallet) external onlyOwner whenNotPaused {
-        require(newCharityWallet != address(0), "New charity wallet cannot be zero address");
-        address oldCharityWallet = _charityWallet;
-        _charityWallet = newCharityWallet;
-        
-        // Exclude new charity wallet from fees
-        _isExcludedFromFee[newCharityWallet] = true;
-        
-        emit CharityWalletUpdated(oldCharityWallet, newCharityWallet);
+    function isKnownDex(address dexAddress) external view returns (bool) {
+        return feeManager.isKnownDex(dexAddress);
     }
     
     /**
-     * @dev Sets the DEX status of an address
-     * Used to properly identify sell transactions for early-sell tax
-     * Can only be called by owner
-     * @param dexAddress Address to mark as DEX
-     * @param isDex True to mark as DEX, false to remove DEX status
+     * @dev See {IDOVE-getEarlySellTaxFor} - delegated to fee manager
      */
-    function setDexStatus(address dexAddress, bool isDex) external onlyOwner whenNotPaused {
-        require(dexAddress != address(0), "Cannot set zero address as DEX");
-        _isKnownDex[dexAddress] = isDex;
-        emit DexStatusUpdated(dexAddress, isDex);
+    function getEarlySellTaxFor(address seller) external view returns (uint16) {
+        return feeManager.getEarlySellTaxFor(seller);
     }
     
     /**
-     * @dev Pause all token transfers
-     * Can only be called by owner
+     * @dev See {IDOVE-isPaused} - delegated to admin manager
      */
-    function pause() external onlyOwner {
-        _pause();
+    function isPaused() external view returns (bool) {
+        return adminManager.isPaused();
     }
     
     /**
-     * @dev Unpause all token transfers
-     * Can only be called by owner
+     * @dev See {IDOVE-isMaxTxLimitEnabled} - delegated to admin manager
      */
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-    
-    /**
-     * @dev See {IDOVE-disableEarlySellTax}
-     * Can only be called by owner
-     * This action is irreversible
-     */
-    function disableEarlySellTax() external onlyOwner {
-        require(_isEarlySellTaxEnabled, "Early sell tax already disabled");
-        _isEarlySellTaxEnabled = false;
-        emit EarlySellTaxDisabled();
-    }
-    
-    /**
-     * @dev See {IDOVE-disableMaxTxLimit}
-     * Can only be called by owner
-     * This action is irreversible
-     */
-    function disableMaxTxLimit() external onlyOwner {
-        require(_isMaxTxLimitEnabled, "Max transaction limit already disabled");
-        _isMaxTxLimitEnabled = false;
-        emit MaxTxLimitDisabled();
+    function isMaxTxLimitEnabled() external view returns (bool) {
+        return adminManager.isMaxTxLimitEnabled();
     }
     
     // ================ Internal Functions ================
@@ -330,7 +175,10 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
         address from,
         address to,
         uint256 amount
-    ) internal virtual override whenNotPaused nonReentrant {
+    ) internal override nonReentrant {
+        // Check if paused
+        require(!adminManager.isPaused(), "Token transfers are paused");
+        
         // Skip all checks for zero transfers
         if (amount == 0) {
             super._transfer(from, to, amount);
@@ -341,20 +189,19 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
         bool isMint = from == address(0);
         bool isBurn = to == address(0);
         bool isRealTransfer = !isMint && !isBurn;
-        bool isSenderExcluded = _isExcludedFromFee[from];
-        bool isReceiverExcluded = _isExcludedFromFee[to];
-        bool isSellToKnownDex = _isKnownDex[to];
+        bool isSenderExcluded = feeManager.isExcludedFromFee(from);
+        bool isReceiverExcluded = feeManager.isExcludedFromFee(to);
+        bool isSellToKnownDex = feeManager.isKnownDex(to);
         
         // Set launch timestamp on first real transfer only if not explicitly launched
         // This is a fallback mechanism in case launch() wasn't called
-        if (!_isLaunched && isRealTransfer) {
-            _isLaunched = true;
-            _launchTimestamp = block.timestamp;
-            emit TokenLaunched(_launchTimestamp);
+        if (!feeManager.isLaunched() && isRealTransfer) {
+            feeManager._setLaunched(block.timestamp);
+            emit TokenLaunched(block.timestamp);
         }
         
         // Check max transaction limit
-        if (_isMaxTxLimitEnabled && 
+        if (adminManager.isMaxTxLimitEnabled() && 
             isRealTransfer && 
             !isSenderExcluded && 
             !isReceiverExcluded) {
@@ -367,12 +214,12 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
         
         // Apply charity fee if applicable (excludes mint, burn, and excluded addresses)
         if (isRealTransfer && !isSenderExcluded && !isReceiverExcluded) {
-            charityFeePercent = CHARITY_FEE;
+            charityFeePercent = feeManager.getCharityFee();
         }
         
         // Add early sell tax if applicable (only applies to sells to DEX addresses)
-        if (_isEarlySellTaxEnabled && !isMint && !isSenderExcluded && isSellToKnownDex) {
-            earlySellTaxPercent = this.getEarlySellTaxFor(from);
+        if (feeManager.isEarlySellTaxEnabled() && !isMint && !isSenderExcluded && isSellToKnownDex) {
+            earlySellTaxPercent = feeManager.getEarlySellTaxFor(from);
         }
         
         // Total fee percentage is the sum of both fee types
@@ -403,14 +250,14 @@ contract DOVE is ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard, IDOVE {
             
             // Then process fees after primary transfer is complete
             if (charityFee > 0) {
-                _totalCharityDonations += charityFee;
-                super._transfer(from, _charityWallet, charityFee);
+                feeManager._addCharityDonation(charityFee);
+                super._transfer(from, feeManager.getCharityWallet(), charityFee);
                 emit CharityFeeCollected(charityFee);
             }
             
             // Early sell tax is automatically burned
             if (earlySellTax > 0) {
-                super._transfer(from, address(0), earlySellTax); // Burn early sell tax
+                super._burn(from, earlySellTax); // Burn early sell tax
                 emit EarlySellTaxCollected(from, earlySellTax);
             }
         } else {

@@ -3,82 +3,106 @@ pragma solidity 0.8.24;
 
 /**
  * @title IDOVE
- * @dev Interface for the DOVE token with charity fee and early-sell tax functionality
+ * @dev Interface for DOVE token with charity fee and early-sell tax
  */
 interface IDOVE {
-    /**
-     * @dev Returns the current charity fee percentage (in basis points)
-     * @return Fee percentage where 50 = 0.5%
-     */
-    function getCharityFee() external view returns (uint16);
-
-    /**
-     * @dev Returns the current early-sell tax percentage for a specific account
-     * @param account Address to check early-sell tax for
-     * @return Early sell tax percentage where 100 = 1%
-     */
-    function getEarlySellTaxFor(address account) external view returns (uint16);
+    
+    // ================ Events ================
     
     /**
-     * @dev Excludes an account from paying fees
-     * @param account Address to exclude
+     * @dev Emitted when token is launched
+     * @param timestamp Timestamp of launch
      */
-    function excludeFromFee(address account) external;
+    event TokenLaunched(uint256 timestamp);
     
     /**
-     * @dev Includes an account in fee payment
-     * @param account Address to include
+     * @dev Emitted when charity fee is collected
+     * @param amount Amount of tokens collected as fee
      */
-    function includeInFee(address account) external;
+    event CharityFeeCollected(uint256 amount);
     
     /**
-     * @dev Checks if an account is excluded from paying fees
-     * @param account Address to check
-     * @return True if account is excluded from fees
+     * @dev Emitted when early sell tax is collected
+     * @param seller Address selling tokens
+     * @param taxAmount Amount of tokens collected as tax
      */
-    function isExcludedFromFee(address account) external view returns (bool);
+    event EarlySellTaxCollected(address indexed seller, uint256 taxAmount);
+    
+    // ================ External Functions ================
     
     /**
-     * @dev Returns the maximum transaction amount
-     * @return Maximum amount that can be transferred in a single transaction
+     * @dev Returns the maximum transaction amount allowed
+     * This changes over time: lower at launch, higher after 24 hours
+     * @return Maximum transaction amount in token units
      */
     function getMaxTransactionAmount() external view returns (uint256);
     
     /**
-     * @dev Permanently disables the early-sell tax mechanism
-     * Can only be called by owner
+     * @dev Returns the current charity fee percentage (in basis points)
+     * @return The charity fee percentage
      */
-    function disableEarlySellTax() external;
+    function getCharityFee() external view returns (uint16);
     
     /**
-     * @dev Permanently disables the max transaction limit
-     * Can only be called by owner
-     */
-    function disableMaxTxLimit() external;
-    
-    /**
-     * @dev Returns the timestamp when the token was first transferred/traded
-     * @return Timestamp in seconds
-     */
-    function getLaunchTimestamp() external view returns (uint256);
-    
-    /**
-     * @dev Returns the address of the charity wallet
-     * @return Address of the charity wallet receiving fees
+     * @dev Returns the current charity wallet address
+     * @return The charity wallet address
      */
     function getCharityWallet() external view returns (address);
     
     /**
+     * @dev Returns the timestamp when the token was launched
+     * @return Timestamp when the token was launched
+     */
+    function getLaunchTimestamp() external view returns (uint256);
+    
+    /**
      * @dev Returns the total amount of tokens donated to charity
-     * @return Total amount donated
+     * @return Total amount of tokens donated to charity
      */
     function getTotalCharityDonations() external view returns (uint256);
-
-    // Events
-    event CharityFeeCollected(uint256 amount);
-    event EarlySellTaxCollected(address indexed seller, uint256 taxAmount);
-    event ExcludeFromFee(address indexed account, bool excluded);
-    event MaxTxLimitDisabled();
-    event EarlySellTaxDisabled();
-    event CharityWalletUpdated(address indexed oldWallet, address indexed newWallet);
+    
+    /**
+     * @dev Returns whether the token has been officially launched
+     * @return True if launched, false otherwise
+     */
+    function isLaunched() external view returns (bool);
+    
+    /**
+     * @dev Returns whether the early sell tax is currently enabled
+     * @return True if enabled, false otherwise
+     */
+    function isEarlySellTaxEnabled() external view returns (bool);
+    
+    /**
+     * @dev Returns whether an address is excluded from fees
+     * @param account Address to check
+     * @return True if excluded, false otherwise
+     */
+    function isExcludedFromFee(address account) external view returns (bool);
+    
+    /**
+     * @dev Returns whether an address is marked as a known DEX
+     * @param dexAddress Address to check
+     * @return True if it's a known DEX, false otherwise
+     */
+    function isKnownDex(address dexAddress) external view returns (bool);
+    
+    /**
+     * @dev Returns the early sell tax percentage for a specific address (in basis points)
+     * @param seller Address to get tax rate for
+     * @return Tax percentage in basis points
+     */
+    function getEarlySellTaxFor(address seller) external view returns (uint16);
+    
+    /**
+     * @dev Returns whether token transfers are paused
+     * @return True if paused, false otherwise
+     */
+    function isPaused() external view returns (bool);
+    
+    /**
+     * @dev Returns whether max transaction limit is enabled
+     * @return True if enabled, false otherwise
+     */
+    function isMaxTxLimitEnabled() external view returns (bool);
 }

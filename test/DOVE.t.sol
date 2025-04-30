@@ -24,7 +24,7 @@ contract DOVETest is Test {
 
     // Events for testing
     event Transfer(address indexed from, address indexed to, uint256 value);
-    event ReflectionFeeCollected(uint256 tFee);
+    event CharityFeeCollected(uint256 amount);
     event EarlySellTaxCollected(address indexed seller, uint256 taxAmount);
     event ExcludeFromFee(address indexed account, bool excluded);
 
@@ -71,32 +71,32 @@ contract DOVETest is Test {
     }
 
     /**
-     * @dev Test reflection fee mechanism
+     * @dev Test charity fee mechanism
      */
-    function testReflectionFee() public {
+    function testCharityFee() public {
         // First send some tokens to alice
         uint256 initialAmount = 1000 * 1e18;
         dove.transfer(alice, initialAmount);
         
-        // Now alice sends to bob (this will incur reflection fee)
+        // Now alice sends to bob (this will incur charity fee)
         uint256 transferAmount = 100 * 1e18;
-        uint256 reflectionFee = transferAmount * 100 / 10000; // 1% fee
+        uint256 charityFee = transferAmount * 50 / 10000; // 0.5% fee
         
         vm.startPrank(alice);
         
         vm.expectEmit(true, true, false, false);
-        emit ReflectionFeeCollected(reflectionFee);
+        emit CharityFeeCollected(charityFee);
         
         dove.transfer(bob, transferAmount);
         vm.stopPrank();
         
         // Bob should receive amount - fee
-        assertEq(dove.balanceOf(bob), transferAmount - reflectionFee);
+        assertEq(dove.balanceOf(bob), transferAmount - charityFee);
         
         // Alice should have initial - transfer
         assertEq(dove.balanceOf(alice), initialAmount - transferAmount);
         
-        // Owner should get some reflection (very small amount)
+        // Owner should get some charity (very small amount)
         assertGt(dove.balanceOf(owner), TOTAL_SUPPLY - initialAmount);
     }
     
@@ -117,8 +117,8 @@ contract DOVETest is Test {
         
         // Early sell tax should be 3% for first 24 hours
         uint256 expectedEarlySellTax = transferAmount * 300 / 10000; // 3%
-        uint256 expectedReflectionFee = transferAmount * 100 / 10000; // 1%
-        uint256 totalFee = expectedEarlySellTax + expectedReflectionFee;
+        uint256 expectedCharityFee = transferAmount * 50 / 10000; // 0.5%
+        uint256 totalFee = expectedEarlySellTax + expectedCharityFee;
         
         vm.startPrank(alice);
         
