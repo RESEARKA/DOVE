@@ -68,6 +68,7 @@ contract DOVEAdmin is Ownable2Step, Pausable, ReentrancyGuard, AccessControl, ID
         uint256 approvalCountForEvent = currentApprovalCount;
         
         // Reset all approval states before any external calls can occur
+        // This ensures that even if reentrancy occurs, the operation can't be approved again
         _approvalCounts[operation] = 0;
         for (uint256 i = 0; i < _approvers.length; i++) {
             _pendingApprovals[operation][_approvers[i]] = false;
@@ -205,7 +206,7 @@ contract DOVEAdmin is Ownable2Step, Pausable, ReentrancyGuard, AccessControl, ID
         
         _requiredApprovals = required;
         
-        emit RequiredApprovalsUpdated(required);
+        emit RequiredApprovalsUpdated(required, required);
     }
     
     /**
@@ -267,18 +268,32 @@ contract DOVEAdmin is Ownable2Step, Pausable, ReentrancyGuard, AccessControl, ID
         emit OperationApproved(operation, msg.sender, _approvalCounts[operation], _requiredApprovals);
     }
     
+    /**
+     * @dev Returns whether the contract is paused
+     * @return True if paused, false if not
+     */
+    function isPaused() external view override returns (bool) {
+        return paused();
+    }
+    
     // ================ External Functions ================
+    
+    /**
+     * @dev Internal implementation of token launch
+     */
+    function launchToken() internal {
+        require(!_feeManager.isLaunched(), "Token already launched");
+        
+        // Mark token as launched and record the timestamp
+        _feeManager._setLaunched(block.timestamp);
+        emit TokenLaunched(block.timestamp);
+    }
     
     /**
      * @dev See {IDOVEAdmin-launch}
      */
     function launch() external onlyRole(DEFAULT_ADMIN_ROLE) requiresMultiSig(keccak256("launch")) nonReentrant {
-        require(!_feeManager.isLaunched(), "Token already launched");
-        
-        // SECURITY: Apply checks-effects-interactions pattern
-        // Update internal state first
-        _feeManager.launch();
-        emit TokenLaunched(block.timestamp);
+        launchToken();
     }
     
     /**
@@ -371,12 +386,14 @@ contract DOVEAdmin is Ownable2Step, Pausable, ReentrancyGuard, AccessControl, ID
     }
     
     // ================ Events ================
+    // Note: Events defined in IDOVEAdmin are not redeclared here
     
-    event ApproverAdded(address indexed approver);
-    event ApproverRemoved(address indexed approver);
-    event RequiredApprovalsUpdated(uint256 required);
     event OperationPending(bytes32 indexed operation, address indexed approver, uint256 currentApprovals, uint256 requiredApprovals);
     event OperationApproved(bytes32 indexed operation, address indexed approver, uint256 currentApprovals, uint256 requiredApprovals);
     event OperationExecuted(bytes32 indexed operation, uint256 approvalCount);
+    event ApproverAdded(address indexed approver);
+    event ApproverRemoved(address indexed approver);
+    event RequiredApprovalsUpdated(uint256 oldRequired, uint256 newRequired);
     event ApprovalsReset(bytes32 indexed operation);
+    event MaxTxLimitToggled(bool isEnabled);
 }

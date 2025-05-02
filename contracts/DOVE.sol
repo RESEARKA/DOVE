@@ -49,6 +49,10 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
     mapping(bytes32 => mapping(address => bool)) private _roleChangeApprovals;
     mapping(bytes32 => uint256) private _roleChangeApprovalCounts;
     
+    // Role approval expiration - approvals automatically expire after this time
+    uint256 private constant ROLE_APPROVAL_EXPIRATION = 3 days;
+    mapping(bytes32 => uint256) private _roleChangeInitiatedTime;
+    
     // ================ State Variables ================
     
     // Fee management module - handles charity fee and early sell tax
@@ -79,10 +83,10 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
         uint256 initialSupply = TOTAL_SUPPLY;
         
         // Initial distribution: 100% to deployer, to be distributed according to tokenomics
-        _balances[msg.sender] = initialSupply;
+        _mint(msg.sender, initialSupply);
         
         // Set max transaction limit (1% of total supply)
-        _maxTxAmount = initialSupply / 100;
+        // This will be managed by the adminManager
         
         // Verify that owner of this contract controls the manager contracts
         // This prevents accidental misconfiguration
@@ -286,17 +290,19 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
         // SECURITY: Explicit balance check for underflow protection
         // Even though Solidity 0.8+ has built-in overflow checking, this makes the check explicit
         // and provides a more descriptive error message
-        require(sender == address(0) || _balances[sender] >= amount, "ERC20: transfer amount exceeds balance");
+        require(sender == address(0) || balanceOf(sender) >= amount, "ERC20: transfer amount exceeds balance");
         
         // Update sender balance
         if (sender != address(0)) {
-            _balances[sender] -= amount;
+            // Use proper _update method instead of direct balance manipulation
+            super._update(sender, recipient, amount);
+        } else {
+            // If minting new tokens, use _update with address(0) as sender
+            super._update(address(0), recipient, amount);
         }
         
-        // Update recipient balance
-        if (recipient != address(0)) {
-            _balances[recipient] += amount;
-        }
+        // Note: We don't need to update recipient balance here anymore
+        // since super._update already handles this
         
         // Emit transfer event
         emit Transfer(sender, recipient, amount);
@@ -317,6 +323,7 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
         require(sender != address(0), "ERC20: transfer from the zero address");
         require(recipient != address(0), "ERC20: transfer to the zero address");
         require(amount > 0, "ERC20: transfer amount must be greater than zero");
+        require(balanceOf(sender) >= amount, "ERC20: transfer amount exceeds balance");
         
         // Reject transfers when paused, unless the sender has the OPERATOR_ROLE
         if (adminManager.paused()) {
@@ -325,7 +332,28 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
         
         // Check for max transaction limit if enabled
         if (adminManager.isMaxTxLimitEnabled() && !feeManager.isExcludedFromFee(sender) && !feeManager.isExcludedFromFee(recipient)) {
-            require(amount <= _maxTxAmount, "DOVE: Transfer amount exceeds the maximum allowed");
+            // Calculate max transaction amount inline since we can't call the public method from here
+            uint256 maxAmount;
+            
+            // Early check - if max tx limit is disabled, use max uint256
+            if (!adminManager.isMaxTxLimitEnabled()) {
+                maxAmount = type(uint256).max;
+            } else if (!feeManager.isLaunched()) {
+                // If token is not launched yet, use initial limit
+                maxAmount = MAX_TX_INITIAL;
+            } else {
+                // Calculate time elapsed since launch
+                uint256 timeElapsed = block.timestamp - feeManager.getLaunchTimestamp();
+                
+                // Apply time-based transaction limits
+                if (timeElapsed < 24 hours) {
+                    maxAmount = MAX_TX_INITIAL;
+                } else {
+                    maxAmount = MAX_TX_AFTER_24H;
+                }
+            }
+            
+            require(amount <= maxAmount, "DOVE: Transfer amount exceeds the maximum allowed");
         }
         
         // ===== FEES CALCULATION - Load all state variables first =====
@@ -390,45 +418,51 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
         require(hasRole(ROLE_MANAGER_ROLE, msg.sender) || hasRole(DEFAULT_ADMIN_ROLE, msg.sender), 
             "Must have role manager or admin role");
         
-        // Generate a unique operation identifier
-        bytes32 operation = keccak256(abi.encodePacked("grantRole", role, account));
-        
-        // Ensure caller hasn't already approved this operation
-        require(!_roleChangeApprovals[operation][msg.sender], "Already approved this role change");
-        
-        // Record this approval
-        _roleChangeApprovals[operation][msg.sender] = true;
-        _roleChangeApprovalCounts[operation]++;
-        
-        emit RoleChangeApprovalAdded(operation, msg.sender, role, account, 
-            _roleChangeApprovalCounts[operation], _requiredRoleApprovals);
-        
-        // If we have enough approvals, execute the role grant
-        if (_roleChangeApprovalCounts[operation] >= _requiredRoleApprovals) {
-            // Save approval count for event
-            uint256 approvalCount = _roleChangeApprovalCounts[operation];
+        // For the most sensitive roles, require multi-sig approval
+        if (role == DEFAULT_ADMIN_ROLE || role == ROLE_MANAGER_ROLE) {
+            bytes32 operation = keccak256(abi.encodePacked("grantRole", role, account));
             
-            // Reset approvals
+            // Check if this is a new approval request
+            if (_roleChangeApprovalCounts[operation] == 0) {
+                // Initialize approval timestamp to enable timeout mechanism
+                _roleChangeInitiatedTime[operation] = block.timestamp;
+            }
+            
+            // Check if approval period has expired
+            if (_roleChangeInitiatedTime[operation] > 0 && 
+                block.timestamp > _roleChangeInitiatedTime[operation] + ROLE_APPROVAL_EXPIRATION) {
+                // Reset approvals if expired
+                _roleChangeApprovalCounts[operation] = 0;
+                // Update timestamp for new approval period
+                _roleChangeInitiatedTime[operation] = block.timestamp;
+            }
+            
+            // If caller hasn't already approved, register their approval
+            if (!_roleChangeApprovals[operation][msg.sender]) {
+                _roleChangeApprovals[operation][msg.sender] = true;
+                _roleChangeApprovalCounts[operation]++;
+                
+                emit RoleChangeApproved(role, account, msg.sender, _roleChangeApprovalCounts[operation], _requiredRoleApprovals);
+            }
+            
+            // If we don't have enough approvals yet, revert
+            if (_roleChangeApprovalCounts[operation] < _requiredRoleApprovals) {
+                revert(string(abi.encodePacked("Role change requires ", 
+                    toString(_requiredRoleApprovals - _roleChangeApprovalCounts[operation]), 
+                    " more approvals")));
+            }
+            
+            // Reset approvals after successful action to prevent reuse
             _roleChangeApprovalCounts[operation] = 0;
-            
-            // Grant the role
-            super.grantRole(role, account);
-            
-            // Emit completion event
-            emit RoleChangeExecuted(operation, role, account, approvalCount);
-        } else {
-            // Not enough approvals yet
-            revert(string(abi.encodePacked(
-                "Role grant requires ", 
-                toString(_requiredRoleApprovals - _roleChangeApprovalCounts[operation]),
-                " more approvals"
-            )));
         }
+        
+        // Grant the role
+        _grantRole(role, account);
     }
     
     /**
      * @dev Multi-signature requirement for revoking roles
-     * @param role The role to revoke
+     * @param role The role to revoke 
      * @param account The account to revoke the role from
      */
     function revokeRole(bytes32 role, address account) public override nonReentrant {
@@ -436,40 +470,46 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
         require(hasRole(ROLE_MANAGER_ROLE, msg.sender) || hasRole(DEFAULT_ADMIN_ROLE, msg.sender), 
             "Must have role manager or admin role");
         
-        // Generate a unique operation identifier
-        bytes32 operation = keccak256(abi.encodePacked("revokeRole", role, account));
-        
-        // Ensure caller hasn't already approved this operation
-        require(!_roleChangeApprovals[operation][msg.sender], "Already approved this role change");
-        
-        // Record this approval
-        _roleChangeApprovals[operation][msg.sender] = true;
-        _roleChangeApprovalCounts[operation]++;
-        
-        emit RoleChangeApprovalAdded(operation, msg.sender, role, account, 
-            _roleChangeApprovalCounts[operation], _requiredRoleApprovals);
-        
-        // If we have enough approvals, execute the role revocation
-        if (_roleChangeApprovalCounts[operation] >= _requiredRoleApprovals) {
-            // Save approval count for event
-            uint256 approvalCount = _roleChangeApprovalCounts[operation];
+        // For the most sensitive roles, require multi-sig approval
+        if (role == DEFAULT_ADMIN_ROLE || role == ROLE_MANAGER_ROLE) {
+            bytes32 operation = keccak256(abi.encodePacked("revokeRole", role, account));
             
-            // Reset approvals
+            // Check if this is a new approval request
+            if (_roleChangeApprovalCounts[operation] == 0) {
+                // Initialize approval timestamp to enable timeout mechanism
+                _roleChangeInitiatedTime[operation] = block.timestamp;
+            }
+            
+            // Check if approval period has expired
+            if (_roleChangeInitiatedTime[operation] > 0 && 
+                block.timestamp > _roleChangeInitiatedTime[operation] + ROLE_APPROVAL_EXPIRATION) {
+                // Reset approvals if expired
+                _roleChangeApprovalCounts[operation] = 0;
+                // Update timestamp for new approval period
+                _roleChangeInitiatedTime[operation] = block.timestamp;
+            }
+            
+            // If caller hasn't already approved, register their approval
+            if (!_roleChangeApprovals[operation][msg.sender]) {
+                _roleChangeApprovals[operation][msg.sender] = true;
+                _roleChangeApprovalCounts[operation]++;
+                
+                emit RoleChangeApproved(role, account, msg.sender, _roleChangeApprovalCounts[operation], _requiredRoleApprovals);
+            }
+            
+            // If we don't have enough approvals yet, revert
+            if (_roleChangeApprovalCounts[operation] < _requiredRoleApprovals) {
+                revert(string(abi.encodePacked("Role change requires ", 
+                    toString(_requiredRoleApprovals - _roleChangeApprovalCounts[operation]), 
+                    " more approvals")));
+            }
+            
+            // Reset approvals after successful action to prevent reuse
             _roleChangeApprovalCounts[operation] = 0;
-            
-            // Revoke the role
-            super.revokeRole(role, account);
-            
-            // Emit completion event
-            emit RoleChangeExecuted(operation, role, account, approvalCount);
-        } else {
-            // Not enough approvals yet
-            revert(string(abi.encodePacked(
-                "Role revocation requires ", 
-                toString(_requiredRoleApprovals - _roleChangeApprovalCounts[operation]),
-                " more approvals"
-            )));
         }
+        
+        // Revoke the role
+        _revokeRole(role, account);
     }
     
     /**
@@ -502,6 +542,7 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
     }
     
     // ================ Events ================
-    event RoleChangeApprovalAdded(bytes32 indexed operation, address indexed approver, bytes32 indexed role, address account, uint256 currentApprovals, uint256 requiredApprovals);
+    event RoleChangeApproved(bytes32 indexed role, address indexed account, address indexed approver, uint256 currentApprovals, uint256 requiredApprovals);
+    event RoleChangeAdded(bytes32 indexed operation, address indexed approver, bytes32 indexed role, address account, uint256 currentApprovals, uint256 requiredApprovals);
     event RoleChangeExecuted(bytes32 indexed operation, bytes32 indexed role, address account, uint256 approvalCount);
 }

@@ -1,10 +1,9 @@
 import { ethers } from "hardhat";
 import { verify } from "../utils/verify";
-import { DOVE } from "../../typechain-types";
 
 /**
- * Deploy DOVE token contract to the Base network
- * Usage: `pnpm hardhat run scripts/deploy/dove.ts --network base`
+ * Deploy DOVE token contract to the Base Sepolia testnet
+ * Usage: `pnpm hardhat run scripts/deploy/dove.ts --network baseSepolia`
  * 
  * Follows DOVE Developer Guidelines Section 7 - Deployment Flow
  */
@@ -20,33 +19,45 @@ export async function deployDove() {
   
   console.log(`Using charity wallet: ${charityWallet}`);
   
-  // Deploy DOVE contract with charity wallet parameter
-  // This will automatically deploy DOVEFees and DOVEAdmin as part of the constructor
-  const Dove = await ethers.getContractFactory("DOVE");
-  const dove = await Dove.deploy(charityWallet) as DOVE;
-  const doveAddress = await dove.getAddress();
-  
-  console.log(`DOVE token deployed at: ${doveAddress}`);
-
-  // Get addresses of the module contracts
-  const feesAddress = await dove.feeManager();
-  const adminAddress = await dove.adminManager();
-  
+  // Step 1: Deploy DOVEFees contract
+  console.log("Deploying DOVEFees contract...");
+  const DOVEFeesFactory = await ethers.getContractFactory("DOVEFees");
+  const feeManager = await DOVEFeesFactory.deploy(charityWallet);
+  const feesAddress = await feeManager.getAddress();
   console.log(`DOVEFees deployed at: ${feesAddress}`);
+  
+  // Step 2: Deploy DOVEAdmin contract
+  console.log("Deploying DOVEAdmin contract...");
+  const DOVEAdminFactory = await ethers.getContractFactory("DOVEAdmin");
+  const adminManager = await DOVEAdminFactory.deploy(feesAddress);
+  const adminAddress = await adminManager.getAddress();
   console.log(`DOVEAdmin deployed at: ${adminAddress}`);
   
-  // Verify contract on block explorer if not on a local network
+  // Step 3: Deploy DOVE token contract with the addresses of the management contracts
+  console.log("Deploying DOVE token contract...");
+  const DOVEFactory = await ethers.getContractFactory("DOVE");
+  const dove = await DOVEFactory.deploy(adminAddress, feesAddress);
+  const doveAddress = await dove.getAddress();
+  console.log(`DOVE token deployed at: ${doveAddress}`);
+  
+  // Verify contracts on block explorer if not on a local network
   const { chainId } = await ethers.provider.getNetwork();
   if (chainId !== 31337n) { // Not localhost
     console.log("Waiting for block confirmations...");
-    const tx = dove.deploymentTransaction();
-    if (tx) await tx.wait(6); // Wait for 6 confirmations
     
-    // Verify the main token contract
-    await verify(doveAddress, [charityWallet]);
-    console.log("DOVE contract verified on BaseScan");
+    // Wait for confirmations for each contract
+    const feeTx = feeManager.deploymentTransaction();
+    if (feeTx) await feeTx.wait(6);
     
-    // Verify module contracts
+    const adminTx = adminManager.deploymentTransaction();
+    if (adminTx) await adminTx.wait(6);
+    
+    const doveTx = dove.deploymentTransaction();
+    if (doveTx) await doveTx.wait(6);
+    
+    // Verify contracts
+    console.log("Verifying contracts on BaseScan...");
+    
     try {
       // Verify DOVEFees contract
       await verify(feesAddress, [charityWallet]);
@@ -55,52 +66,34 @@ export async function deployDove() {
       // Verify DOVEAdmin contract
       await verify(adminAddress, [feesAddress]);
       console.log("DOVEAdmin contract verified on BaseScan");
+      
+      // Verify the main token contract
+      await verify(doveAddress, [adminAddress, feesAddress]);
+      console.log("DOVE contract verified on BaseScan");
     } catch (error) {
-      console.log("Warning: Verification of module contracts failed. You may need to verify them manually.");
+      console.log("Warning: Contract verification failed. You may need to verify them manually.");
       console.error(error);
     }
   }
   
-  // If deployer isn't the final owner, transfer ownership to multisig
-  // Note: Ownership of the module contracts is already transferred in the DOVE constructor
+  // Print ownership transfer instructions
   if (deployer.address !== multisigAddress) {
-    console.log(`\nTransferring ownership to multisig: ${multisigAddress}`);
+    console.log(`\nIMPORTANT: Transfer ownership to multisig (${multisigAddress}) using these commands:`);
+    console.log(`\n1. For DOVEFees (${feesAddress}):`);
+    console.log(`   npx hardhat --network baseSepolia run scripts/admin/transfer-ownership.js --contract ${feesAddress} --new-owner ${multisigAddress}`);
     
-    try {
-      // Using ethers v6 interface syntax
-      const ownableInterface = ethers.Interface.from([
-        "function transferOwnership(address newOwner)"
-      ]);
-      
-      // Create transaction data
-      const data = ownableInterface.encodeFunctionData(
-        "transferOwnership", [multisigAddress]
-      );
-      
-      // Send transaction
-      const tx = await deployer.sendTransaction({
-        to: doveAddress,
-        data
-      });
-      
-      await tx.wait();
-      console.log("Ownership transfer initiated. Multisig must accept ownership.");
-      
-      console.log(`\nIMPORTANT: The multisig wallet (${multisigAddress}) must call acceptOwnership() on:`);
-      console.log(`1. Main token contract: ${doveAddress}`);
-      console.log(`2. DOVEFees contract: ${feesAddress}`);
-      console.log(`3. DOVEAdmin contract: ${adminAddress}`);
-    } catch (error) {
-      console.error("Error transferring ownership:", error);
-      console.log("You may need to transfer ownership manually after deployment.");
-    }
+    console.log(`\n2. For DOVEAdmin (${adminAddress}):`);
+    console.log(`   npx hardhat --network baseSepolia run scripts/admin/transfer-ownership.js --contract ${adminAddress} --new-owner ${multisigAddress}`);
+    
+    console.log(`\n3. For DOVE token (${doveAddress}):`);
+    console.log(`   npx hardhat --network baseSepolia run scripts/admin/grant-role.js --contract ${doveAddress} --role DEFAULT_ADMIN_ROLE --account ${multisigAddress}`);
+    console.log(`   npx hardhat --network baseSepolia run scripts/admin/revoke-role.js --contract ${doveAddress} --role DEFAULT_ADMIN_ROLE --account ${deployer.address}`);
   }
   
   return { 
-    dove, 
+    dove: doveAddress,
     feeManager: feesAddress,
-    adminManager: adminAddress,
-    deployer 
+    adminManager: adminAddress
   };
 }
 
@@ -108,7 +101,7 @@ export async function deployDove() {
 if (require.main === module) {
   deployDove()
     .then(() => process.exit(0))
-    .catch(error => {
+    .catch((error) => {
       console.error(error);
       process.exit(1);
     });

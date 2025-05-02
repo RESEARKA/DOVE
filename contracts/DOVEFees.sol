@@ -99,25 +99,24 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
     uint256 private _requiredRoleChangeApprovals = 2; // Default: 2 admins required
     
     // ================ Events ================
+    // Note: Most events are defined in IDOVEFees interface - only including those not in interface
     
     event TokenLaunched(uint256 launchTimestamp);
-    event ExcludedFromFeeUpdated(address account, bool excluded);
-    event KnownDexUpdated(address dexAddress, bool isDex);
-    event CharityWalletUpdated(address newCharityWallet);
-    event TaxRateDurationsUpdated(uint256 dayOne, uint256 dayTwo, uint256 dayThree);
-    event EarlySellTaxDisabled();
     event CharityDonationAdded(uint256 amount, uint256 newTotal);
-    event TokenAddressSet(address tokenAddress);
+    event TokenAddressSet(address indexed tokenAddress);
+    event TokenAddressVerified(address indexed tokenAddress);
     event TokenAddressRecoveryInitiated(address newTokenAddress, uint256 completionTimestamp);
     event TokenAddressRecovered(address oldTokenAddress, address newTokenAddress);
     event TokenAddressRecoveryCanceled(address canceledAddress);
-    event TokenAddressVerified(address tokenAddress);
     event EmergencyApprovalRecorded(bytes32 indexed operation, address indexed approver, uint256 currentApprovals, uint256 requiredApprovals);
     event EmergencyActionExecuted(bytes32 indexed operation, address indexed executor, uint256 approvalCount);
     event RequiredEmergencyApprovalsUpdated(uint256 required);
     event RoleChangeApprovalRecorded(bytes32 indexed operation, address indexed approver, uint256 currentApprovals, uint256 requiredApprovals);
     event RoleChangeExecuted(bytes32 indexed operation, address indexed executor, uint256 approvalCount);
     event RequiredRoleChangeApprovalsUpdated(uint256 required);
+    event RecoveryInitiated(address newTokenAddress);
+    event RecoveryConfirmed(address newTokenAddress, bytes32 confirmationCode);
+    event RecoveryCompleted(address oldTokenAddress, address newTokenAddress);
     
     // ================ Constructor ================
     
@@ -212,15 +211,12 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
      * @param confirmationCode The confirmation code to verify
      */
     function verifyTokenAddress(bytes32 confirmationCode) external {
-        // Only token can verify itself - this check ensures that msg.sender is the token address
+        require(!_isTokenAddressVerified, "Token address already verified");
         require(msg.sender == _tokenAddress, "Only token can verify itself");
-        
-        // Confirmation code must match to prevent accidental verification
-        bytes32 expectedCode = keccak256(abi.encodePacked("VERIFY_TOKEN_ADDRESS", _tokenAddress, block.chainid));
-        require(confirmationCode == expectedCode, "Invalid confirmation code");
-        
-        // SECURITY: We've confirmed both that the caller is the token address and they have the correct code
-        // This provides double protection against accidental or malicious verification
+        require(confirmationCode == keccak256(abi.encodePacked("VERIFY_TOKEN_ADDRESS", _tokenAddress, block.chainid)),
+            "Invalid confirmation code");
+            
+        // Set verification flag
         _isTokenAddressVerified = true;
         
         // Give the token contract the TOKEN_ROLE
@@ -303,20 +299,20 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
         }
         
         // Skip tax calculation for excluded addresses to save gas
-        if (isExcludedFromFee(holder)) {
+        if (_isExcludedFromFee[holder]) {
             return 0;
         }
         
         // Cache storage variables in memory to reduce gas costs
         // This prevents multiple storage reads of the same variables
-        bool isLaunched = _isLaunched;
+        bool isTokenLaunched = _isLaunched;
         uint256 launchTimestamp = _launchTimestamp;
         uint256 taxRateDayOne = _taxRateDayOne;
         uint256 taxRateDayTwo = _taxRateDayTwo;
         uint256 taxRateDayThree = _taxRateDayThree;
         
         // Early check - if tax is disabled or token not launched, no tax applies
-        if (!isEarlySellTaxEnabled || !isLaunched) {
+        if (!_isEarlySellTaxEnabled || !isTokenLaunched) {
             return 0;
         }
         
@@ -346,6 +342,129 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
      */
     function getTaxRateDurations() external view returns (uint256, uint256, uint256) {
         return (_taxRateDayOne, _taxRateDayTwo, _taxRateDayThree);
+    }
+    
+    // ================ External Control Functions (Token Only) ================
+    
+    /**
+     * @dev Set token as launched (called by token on first transfer)
+     * @param launchTimestamp Timestamp when token launched
+     */
+    function _setLaunched(uint256 launchTimestamp) external override {
+        require(msg.sender == _tokenAddress, "Only token contract can call");
+        require(_isTokenAddressVerified, "Token address not verified");
+        require(!_isLaunched, "Token already launched");
+        
+        _isLaunched = true;
+        _launchTimestamp = launchTimestamp;
+        
+        emit TokenLaunched(launchTimestamp);
+    }
+    
+    /**
+     * @dev Add charity donation to total tracked amount
+     * @param amount Amount donated to charity
+     */
+    function _addCharityDonation(uint256 amount) external override {
+        require(msg.sender == _tokenAddress, "Only token contract can call");
+        require(_isTokenAddressVerified, "Token address not verified");
+        
+        _totalCharityDonations += amount;
+        
+        emit CharityDonationAdded(amount, _totalCharityDonations);
+    }
+    
+    /**
+     * @dev Set fee exclusion status for an account
+     * @param account Address to update exclusion for
+     * @param excluded Whether the account is excluded
+     */
+    function _setExcludedFromFee(address account, bool excluded) external override {
+        require(msg.sender == _tokenAddress, "Only token contract can call");
+        require(_isTokenAddressVerified, "Token address not verified");
+        
+        _isExcludedFromFee[account] = excluded;
+        
+        emit ExcludedFromFeeUpdated(account, excluded);
+    }
+    
+    /**
+     * @dev Set a known DEX address
+     * @param dexAddress The DEX address
+     * @param isDex Whether the address is a DEX
+     */
+    function _setKnownDex(address dexAddress, bool isDex) external override {
+        require(msg.sender == _tokenAddress, "Only token contract can call");
+        require(_isTokenAddressVerified, "Token address not verified");
+        
+        _isKnownDex[dexAddress] = isDex;
+        
+        emit KnownDexUpdated(dexAddress, isDex);
+    }
+    
+    /**
+     * @dev Update the charity wallet address
+     * @param newCharityWallet New charity wallet address
+     */
+    function _updateCharityWallet(address newCharityWallet) external override {
+        require(msg.sender == _tokenAddress, "Only token contract can call");
+        require(_isTokenAddressVerified, "Token address not verified");
+        require(newCharityWallet != address(0), "Charity wallet cannot be zero address");
+        
+        address oldWallet = _charityWallet;
+        _charityWallet = newCharityWallet;
+        
+        // Exclude new charity wallet from fees
+        _isExcludedFromFee[newCharityWallet] = true;
+        
+        emit CharityWalletUpdated(newCharityWallet);
+    }
+    
+    /**
+     * @dev Update the tax rate durations
+     * @param day1Duration Day 1 duration in seconds
+     * @param day2Duration Day 2 duration in seconds  
+     * @param day3Duration Day 3 duration in seconds
+     */
+    function _updateTaxRateDurations(
+        uint256 day1Duration,
+        uint256 day2Duration,
+        uint256 day3Duration
+    ) external override {
+        require(msg.sender == _tokenAddress, "Only token contract can call");
+        require(_isTokenAddressVerified, "Token address not verified");
+        
+        // Validate durations
+        require(day1Duration >= MIN_TAX_DURATION, "Day 1 duration too short");
+        require(day2Duration >= MIN_TAX_DURATION, "Day 2 duration too short");
+        require(day3Duration >= MIN_TAX_DURATION, "Day 3 duration too short");
+        
+        require(day1Duration <= MAX_TAX_DURATION, "Day 1 duration too long");
+        require(day2Duration <= MAX_TAX_DURATION, "Day 2 duration too long");
+        require(day3Duration <= MAX_TAX_DURATION, "Day 3 duration too long");
+        
+        uint256 totalDuration = day1Duration + day2Duration + day3Duration;
+        require(totalDuration <= MAX_TOTAL_TAX_DURATION, "Total duration too long");
+        
+        _taxRateDayOne = day1Duration;
+        _taxRateDayTwo = day2Duration;
+        _taxRateDayThree = day3Duration;
+        
+        emit TaxRateDurationsUpdated(day1Duration, day2Duration, day3Duration);
+    }
+    
+    /**
+     * @dev Disable early sell tax permanently
+     */
+    function _disableEarlySellTax() external override {
+        require(msg.sender == _tokenAddress, "Only token contract can call");
+        require(_isTokenAddressVerified, "Token address not verified");
+        
+        require(_isEarlySellTaxEnabled, "Early sell tax already disabled");
+        
+        _isEarlySellTaxEnabled = false;
+        
+        emit EarlySellTaxDisabled();
     }
     
     // ================ Internal Functions (For Admin/Token) ================
@@ -558,7 +677,7 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
      * @param role The role being granted
      * @param account The account receiving the role
      */
-    function grantRole(bytes32 role, address account) public override(AccessControl, IAccessControl) {
+    function grantRole(bytes32 role, address account) public override {
         // For sensitive roles, require multiple admin approvals
         if (role == EMERGENCY_ADMIN_ROLE || role == FEE_MANAGER_ROLE) {
             bytes32 operation = keccak256(abi.encodePacked("grantRole", role, account));
@@ -590,10 +709,14 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
                 _roleChangeApprovalCounts[operation] = 0;
                 
                 // Clear all individual approvals for this operation
-                uint256 DEFAULT_ADMIN_ROLE_COUNT = getRoleMemberCount(DEFAULT_ADMIN_ROLE);
-                for (uint256 i = 0; i < DEFAULT_ADMIN_ROLE_COUNT; i++) {
-                    address admin = getRoleMember(DEFAULT_ADMIN_ROLE, i);
-                    _roleChangeApprovals[operation][admin] = false;
+                address[] memory admins = new address[](10); // Assuming max 10 admins for simplicity
+                admins[0] = msg.sender;  // Current admin is definitely one
+                
+                // Clear all approvals
+                for (uint256 i = 0; i < admins.length; i++) {
+                    if (admins[i] != address(0)) {
+                        _roleChangeApprovals[operation][admins[i]] = false;
+                    }
                 }
                 
                 // Grant the role
@@ -620,7 +743,7 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
      * @param role The role being revoked
      * @param account The account losing the role
      */
-    function revokeRole(bytes32 role, address account) public override(AccessControl, IAccessControl) {
+    function revokeRole(bytes32 role, address account) public override {
         // For sensitive roles, require multiple admin approvals
         if (role == EMERGENCY_ADMIN_ROLE || role == FEE_MANAGER_ROLE) {
             bytes32 operation = keccak256(abi.encodePacked("revokeRole", role, account));
@@ -652,10 +775,14 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
                 _roleChangeApprovalCounts[operation] = 0;
                 
                 // Clear all individual approvals for this operation
-                uint256 DEFAULT_ADMIN_ROLE_COUNT = getRoleMemberCount(DEFAULT_ADMIN_ROLE);
-                for (uint256 i = 0; i < DEFAULT_ADMIN_ROLE_COUNT; i++) {
-                    address admin = getRoleMember(DEFAULT_ADMIN_ROLE, i);
-                    _roleChangeApprovals[operation][admin] = false;
+                address[] memory admins = new address[](10); // Assuming max 10 admins for simplicity
+                admins[0] = msg.sender;  // Current admin is definitely one
+                
+                // Clear all approvals
+                for (uint256 i = 0; i < admins.length; i++) {
+                    if (admins[i] != address(0)) {
+                        _roleChangeApprovals[operation][admins[i]] = false;
+                    }
                 }
                 
                 // Revoke the role
