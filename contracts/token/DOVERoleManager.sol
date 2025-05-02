@@ -2,6 +2,7 @@
 pragma solidity 0.8.24;
 
 import "./DOVEBase.sol";
+import "../utils/StringUtils.sol";
 
 /**
  * @title DOVE Role Manager
@@ -128,6 +129,6 @@ abstract contract DOVERoleManager is DOVEBase {
         // Not enough approvals yet, emit event and revert
         emit RoleOperationPending(role, account, operation, _roleChangeApprovalCounts[operation], _requiredRoleApprovals);
         revert(string(abi.encodePacked("Role operation requires ", 
-            toString(_requiredRoleApprovals - _roleChangeApprovalCounts[operation]), " more approvals")));
+            StringUtils.toString(_requiredRoleApprovals - _roleChangeApprovalCounts[operation]), " more approvals")));
     }
 }

@@ -16,11 +16,17 @@ interface IDOVEAdmin {
     event TokenLaunched(uint256 timestamp);
     
     /**
+     * @dev Emitted when max transaction limit is toggled
+     * @param isEnabled Whether the limit is enabled
+     */
+    event MaxTxLimitToggled(bool isEnabled);
+    
+    /**
      * @dev Emitted when DEX status is updated
      * @param dexAddress Address being updated
      * @param isDex Whether address is a DEX or not
      */
-    event DexStatusUpdated(address indexed dexAddress, bool isDex);
+    event KnownDexUpdated(address indexed dexAddress, bool isDex);
     
     /**
      * @dev Emitted when tax durations are updated
@@ -45,7 +51,7 @@ interface IDOVEAdmin {
      * @param account Address being excluded
      * @param excluded Whether address is excluded or not
      */
-    event ExcludeFromFee(address indexed account, bool excluded);
+    event ExcludedFromFeeUpdated(address indexed account, bool excluded);
     
     /**
      * @dev Emitted when charity wallet is updated
@@ -133,4 +139,10 @@ interface IDOVEAdmin {
      * @return Whether token transfers are paused
      */
     function isPaused() external view returns (bool);
+    
+    /**
+     * @dev Returns `true` if `account` has been granted `role`.
+     * From IAccessControl
+     */
+    function hasRole(bytes32 role, address account) external view returns (bool);
 }

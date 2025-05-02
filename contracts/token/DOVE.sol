@@ -3,6 +3,11 @@ pragma solidity 0.8.24;
 
 import "./DOVETransferHandler.sol";
 import "../interfaces/IDOVE.sol";
+import "../interfaces/IDOVEAdmin.sol";
+import "../interfaces/IDOVEFees.sol";
+
+// Define DEFAULT_ADMIN_ROLE constant
+bytes32 constant DEFAULT_ADMIN_ROLE = 0x00;
 
 /**
  * @title DOVE Token
@@ -36,8 +41,8 @@ contract DOVE is DOVETransferHandler, IDOVE {
         
         // SECURITY: Use direct ownership checks instead of transfers to avoid reentrancy
         // Check that the deployer is the owner of both manager contracts
-        require(IDOVEAdmin(adminManagerAddress).owner() == deployer, "Deployer must own admin manager");
-        require(IDOVEFees(feeManagerAddress).owner() == deployer, "Deployer must own fee manager");
+        require(IDOVEAdmin(adminManagerAddress).hasRole(DEFAULT_ADMIN_ROLE, deployer), "Deployer must have admin role");
+        require(IDOVEFees(feeManagerAddress).hasRole(DEFAULT_ADMIN_ROLE, deployer), "Deployer must have admin role on fee manager"); // Use hasRole
         
         // Verify that fee manager has correct token role setup
         bytes32 tokenRole = IDOVEFees(feeManagerAddress).TOKEN_ROLE();
@@ -123,7 +128,7 @@ contract DOVE is DOVETransferHandler, IDOVE {
     /**
      * @dev See {IDOVE-getEarlySellTaxFor} - delegated to fee manager
      */
-    function getEarlySellTaxFor(address seller) external view override returns (uint16) {
+    function getEarlySellTaxFor(address /* seller */) external view override returns (uint16) {
         // This is a stub - implement based on actual interface requirements
         // In the actual implementation, you would call a fee manager method
         return 0;
@@ -144,6 +149,14 @@ contract DOVE is DOVETransferHandler, IDOVE {
     }
     
     /**
+     * @dev Returns the maximum allowed transaction amount
+     * @return Maximum transaction amount
+     */
+    function getMaxTransactionAmount() external view returns (uint256) {
+        return _getMaxTransactionAmount();
+    }
+    
+    /**
      * @dev Calculates the effective amount that will be received after applying fees
      * Useful for UI and user information purposes to show exact amounts
      * @param sender Address sending the tokens
@@ -151,7 +164,7 @@ contract DOVE is DOVETransferHandler, IDOVE {
      * @param amount Amount of tokens to be sent
      * @return The effective amount that would be received after fees
      */
-    function getEffectiveTransferAmount(address sender, address recipient, uint256 amount) external view override returns (uint256) {
+    function getEffectiveTransferAmount(address sender, address recipient, uint256 amount) external view returns (uint256) {
         // Skip fee calculation if amount is zero, excluded addresses, or mint/burn
         if (amount == 0 || 
             feeManager.isExcludedFromFee(sender) || 
@@ -162,7 +175,7 @@ contract DOVE is DOVETransferHandler, IDOVE {
         }
         
         // Calculate fees using the internal function
-        (uint256 charityFeeAmount, uint256 earlySellTaxAmount) = calculateFees(sender, recipient, amount);
+        (uint256 charityFeeAmount, uint256 earlySellTaxAmount) = feeManager.calculateFees(sender, recipient, amount); // Use feeManager
         
         // Return the amount after deducting fees
         return amount - charityFeeAmount - earlySellTaxAmount;

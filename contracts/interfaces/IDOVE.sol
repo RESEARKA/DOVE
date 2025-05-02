@@ -23,10 +23,10 @@ interface IDOVE {
     
     /**
      * @dev Emitted when early sell tax is collected
-     * @param seller Address selling tokens
-     * @param taxAmount Amount of tokens collected as tax
+     * @param sender Address selling tokens
+     * @param amount Amount of tokens collected as tax
      */
-    event EarlySellTaxCollected(address indexed seller, uint256 taxAmount);
+    event EarlySellTaxCollected(address indexed sender, uint256 amount);
     
     // ================ External Functions ================
     

@@ -8,7 +8,7 @@ import "../interfaces/IDOVEAdmin.sol";
  * @title DOVE Admin
  * @dev Main administration contract for DOVE token
  */
-contract DOVEAdmin is DOVEFeatureController, IDOVEAdmin {
+contract DOVEAdmin is DOVEFeatureController {
     /**
      * @dev Constructor initializes the admin contract
      * @param feeManagerAddress Address of the fee manager contract
@@ -21,7 +21,7 @@ contract DOVEAdmin is DOVEFeatureController, IDOVEAdmin {
      * @dev Check if token is paused
      * @return True if token is paused
      */
-    function isPaused() external view override returns (bool) {
+    function isPaused() external view returns (bool) {
         return paused();
     }
     
@@ -29,75 +29,119 @@ contract DOVEAdmin is DOVEFeatureController, IDOVEAdmin {
      * @dev Check if token is launched
      * @return True if token is launched
      */
-    function isLaunched() external view override returns (bool) {
-        return _isTokenLaunched;
+    function isLaunched() external view returns (bool) {
+        return _feeManager.isLaunched();
     }
     
     /**
-     * @dev Get the launch timestamp
-     * @return Launch timestamp, 0 if not launched
+     * @dev Get the timestamp when token was launched
+     * @return Timestamp of token launch
      */
-    function getLaunchTimestamp() external view override returns (uint256) {
-        return _launchTimestamp;
+    function getLaunchTimestamp() external view returns (uint256) {
+        return _feeManager.getLaunchTimestamp();
     }
     
     /**
-     * @dev Check if maximum transaction limit is enabled
-     * @return True if maximum transaction limit is enabled
+     * @dev Get the required number of approvals for multi-sig operations
+     * @return Required approval count
      */
-    function isMaxTxLimitEnabled() external view override returns (bool) {
-        return _isMaxTxLimitEnabled;
-    }
-    
-    /**
-     * @dev Get the number of required approvals for multi-signature operations
-     * @return Number of required approvals
-     */
-    function getRequiredApprovals() external view override returns (uint256) {
+    function getRequiredApprovals() external view returns (uint256) {
         return _requiredApprovals;
     }
     
     /**
-     * @dev Get the list of approvers for multi-signature operations
+     * @dev Get list of all approvers
      * @return Array of approver addresses
      */
-    function getApprovers() external view override returns (address[] memory) {
+    function getApprovers() external view returns (address[] memory) {
         return _approvers;
     }
     
     /**
-     * @dev Check if an operation has been approved by a specific account
-     * @param operation Operation to check
-     * @param account Account to check
-     * @return True if the operation has been approved by the account
+     * @dev Check if an account has approved an operation
+     * @param operation Hash of the operation
+     * @param account Address to check
+     * @return True if approved
      */
-    function hasApproved(bytes32 operation, address account) external view override returns (bool) {
+    function hasApproved(bytes32 operation, address account) external view returns (bool) {
         return _pendingApprovals[operation][account];
     }
     
     /**
-     * @dev Get the number of approvals for an operation
-     * @param operation Operation to check
-     * @return Number of approvals
+     * @dev Get current approval count for an operation
+     * @param operation Hash of the operation
+     * @return Current approval count
      */
-    function getApprovalCount(bytes32 operation) external view override returns (uint256) {
+    function getApprovalCount(bytes32 operation) external view returns (uint256) {
         return _approvalCounts[operation];
     }
     
     /**
-     * @dev Check if an operation has been completed
-     * @param operation Operation to check
-     * @return True if the operation has been completed
+     * @dev Check if an operation is complete
+     * @param operation Hash of the operation
+     * @return True if completed
      */
-    function isOperationComplete(bytes32 operation) external view override returns (bool) {
+    function isOperationComplete(bytes32 operation) external view returns (bool) {
         return _operationComplete[operation];
     }
     
     /**
-     * @dev Get the fee manager address
-     * @return Fee manager address
+     * @dev Get fee manager address
+     * @return Fee manager contract address
      */
-    function getFeeManager() external view override returns (address) {
+    function getFeeManager() external view returns (address) {
         return address(_feeManager);
+    }
+    
+    /**
+     * @dev Set DEX status for an address
+     * @param dexAddress Address to set status for
+     * @param isDex Whether the address is a DEX
+     */
+    function setDexStatus(address dexAddress, bool isDex) external override(DOVEFeatureController) {
+        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Admin role required");
+        _feeManager.setDexStatus(dexAddress, isDex);
+    }
+    
+    /**
+     * @dev Exclude or include an address from fees
+     * @param account Address to update
+     * @param excluded Whether to exclude from fees
+     */
+    function excludeFromFee(address account, bool excluded) external override(DOVEFeatureController) {
+        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Admin role required");
+        _feeManager.excludeFromFee(account, excluded);
+    }
+    
+    /**
+     * @dev Update tax rate durations
+     * @param firstDayHours Hours for first tax rate
+     * @param secondDayHours Hours for second tax rate
+     * @param thirdDayHours Hours for third tax rate
+     */
+    function updateTaxRateDurations(
+        uint256 firstDayHours,
+        uint256 secondDayHours,
+        uint256 thirdDayHours
+    ) external {
+        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Admin role required");
+        _feeManager.updateTaxRateDurations(firstDayHours, secondDayHours, thirdDayHours);
+    }
+    
+    // ======= Override functions to resolve inheritance conflicts =======
+    
+    /**
+     * @notice Launches the token by calling the parent launch logic.
+     * Overrides the base launch function to add specific admin requirements.
+     */
+    function launch() public override(DOVEFeatureController) onlyRole(DEFAULT_ADMIN_ROLE) requiresMultiSig(keccak256("launch")) nonReentrant {
+        super.launch();
+    }
+    
+    /**
+     * @dev Check if max transaction limit is enabled
+     */
+    function isMaxTxLimitEnabled() external view returns (bool) {
+        return _isMaxTxLimitEnabled;
     }
 }

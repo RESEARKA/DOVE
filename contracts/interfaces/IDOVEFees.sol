@@ -128,6 +128,38 @@ interface IDOVEFees {
      */
     function getTaxRateDurations() external view returns (uint256, uint256, uint256);
     
+    /**
+     * @dev Calculates the charity fee and early sell tax for a given transfer
+     * @param sender The address sending tokens
+     * @param recipient The address receiving tokens
+     * @param amount The amount of the transfer
+     * @return charityFeeAmount The calculated charity fee
+     * @return earlySellTaxAmount The calculated early sell tax
+     */
+    function calculateFees(
+        address sender,
+        address recipient,
+        uint256 amount
+    ) external view returns (uint256 charityFeeAmount, uint256 earlySellTaxAmount);
+    
+    /**
+     * @dev Set the token as launched with a timestamp
+     * @param launchTimestamp Timestamp when token was launched
+     */
+    function setLaunched(uint256 launchTimestamp) external;
+    
+    /**
+     * @dev Add a charity donation to the total tracking
+     * @param amount Amount of tokens donated to charity
+     */
+    function addCharityDonation(uint256 amount) external;
+    
+    /**
+     * @dev Add early sell tax to the total tracking
+     * @param amount Amount of tokens collected as early sell tax
+     */
+    function addEarlySellTax(uint256 amount) external;
+    
     // ================ Internal Functions ================
     
     /**
@@ -147,20 +179,20 @@ interface IDOVEFees {
      * @param account Address to exclude
      * @param excluded Whether to exclude or include
      */
-    function _setExcludedFromFee(address account, bool excluded) external;
+    function excludeFromFee(address account, bool excluded) external;
     
     /**
      * @dev Set an address as known DEX - only callable by admin
      * @param dexAddress Address to mark as DEX
      * @param isDex Whether this address is a DEX or not
      */
-    function _setKnownDex(address dexAddress, bool isDex) external;
+    function setDexStatus(address dexAddress, bool isDex) external;
     
     /**
      * @dev Update charity wallet - only callable by admin
      * @param newCharityWallet New charity wallet address
      */
-    function _updateCharityWallet(address newCharityWallet) external;
+    function updateCharityWallet(address newCharityWallet) external;
     
     /**
      * @dev Update tax rate durations - only callable by admin
@@ -168,7 +200,7 @@ interface IDOVEFees {
      * @param day2 Duration for second tax rate (in seconds)
      * @param day3 Duration for third tax rate (in seconds)
      */
-    function _updateTaxRateDurations(
+    function updateTaxRateDurations(
         uint256 day1,
         uint256 day2,
         uint256 day3
@@ -177,5 +209,28 @@ interface IDOVEFees {
     /**
      * @dev Disable early sell tax - only callable by admin
      */
-    function _disableEarlySellTax() external;
+    function disableEarlySellTax() external;
+    
+    /**
+     * @dev Returns the role identifier required for the token contract to interact
+     */
+    function TOKEN_ROLE() external view returns (bytes32);
+ 
+    /**
+     * @dev Sets the associated token contract address (from DOVETokenAddressManager)
+     * @param tokenAddress The address of the token contract
+     */
+    function setTokenAddress(address tokenAddress) external;
+ 
+    /**
+     * @dev Verifies the token address with a confirmation code (from DOVETokenAddressManager)
+     * @param confirmationCode The verification code
+     */
+    function verifyTokenAddress(bytes32 confirmationCode) external;
+ 
+    /**
+     * @dev Returns `true` if `account` has been granted `role`.
+     * From IAccessControl
+     */
+    function hasRole(bytes32 role, address account) external view returns (bool);
 }

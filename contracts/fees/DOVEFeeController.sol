@@ -12,6 +12,10 @@ abstract contract DOVEFeeController is DOVETokenAddressManager {
     event TokenLaunched(uint256 launchTimestamp);
     event CharityDonationAdded(uint256 amount, uint256 newTotal);
     event EarlySellTaxDisabled();
+    event ExcludedFromFeeUpdated(address indexed account, bool excluded);
+    event KnownDexUpdated(address indexed dexAddress, bool isDex);
+    event CharityWalletUpdated(address oldWallet, address newCharityWallet);
+    event TaxRateDurationsUpdated(uint256 day1Duration, uint256 day2Duration, uint256 day3Duration);
     
     /**
      * @dev Exclude an account from fees
@@ -61,7 +65,7 @@ abstract contract DOVEFeeController is DOVETokenAddressManager {
         // Exclude new charity wallet from fees
         _isExcludedFromFee[newCharityWallet] = true;
         
-        emit CharityWalletUpdated(newCharityWallet);
+        emit CharityWalletUpdated(oldWallet, newCharityWallet);
     }
     
     /**
@@ -100,7 +104,7 @@ abstract contract DOVEFeeController is DOVETokenAddressManager {
      * @dev Set token as launched (called by token on first transfer)
      * @param launchTimestamp Timestamp when token launched
      */
-    function _setLaunched(uint256 launchTimestamp) external override {
+    function _setLaunched(uint256 launchTimestamp) external {
         require(msg.sender == _tokenAddress, "Only token contract can call");
         require(_isTokenAddressVerified, "Token address not verified");
         require(!_isLaunched, "Token already launched");
@@ -115,7 +119,7 @@ abstract contract DOVEFeeController is DOVETokenAddressManager {
      * @dev Add charity donation to total tracked amount
      * @param amount Amount donated to charity
      */
-    function _addCharityDonation(uint256 amount) external override {
+    function _addCharityDonation(uint256 amount) external {
         require(msg.sender == _tokenAddress, "Only token contract can call");
         require(_isTokenAddressVerified, "Token address not verified");
         

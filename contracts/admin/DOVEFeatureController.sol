@@ -2,15 +2,19 @@
 pragma solidity 0.8.24;
 
 import "./DOVEMultiSigGovernance.sol";
+import "../interfaces/IDOVEAdmin.sol";
 
 /**
  * @title DOVE Feature Controller
- * @dev Manages token features like pause, max transaction limit, and launch
+ * @dev Controls token features like pause, max tx limit, etc.
  */
-abstract contract DOVEFeatureController is DOVEMultiSigGovernance {
-    // ================ Events ================
-    event MaxTxLimitToggled(bool isEnabled);
-    
+abstract contract DOVEFeatureController is DOVEMultiSigGovernance, IDOVEAdmin {
+    // Role identifier for pauser role
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+
+    // Flag for permanently disabling max tx limit
+    bool internal _maxTxLimitPermanentlyDisabled;
+
     /**
      * @dev Internal implementation of token launch
      */
@@ -23,52 +27,53 @@ abstract contract DOVEFeatureController is DOVEMultiSigGovernance {
     }
     
     /**
-     * @dev Launch the token (multi-sig required)
+     * @dev Launch the token
+     * This function triggers the token launch process in the fee manager
      */
-    function launch() external onlyRole(DEFAULT_ADMIN_ROLE) requiresMultiSig(keccak256("launch")) nonReentrant {
+    function launch() public virtual onlyRole(DEFAULT_ADMIN_ROLE) requiresMultiSig(keccak256("launch")) nonReentrant {
         launchToken();
     }
     
     /**
-     * @dev Pause token transfers (multi-sig required)
+     * @dev Pause all token transfers (direct call - no multi-sig required)
+     * This provides a rapid response mechanism for emergencies
      */
-    function pause() external onlyRole(DEFAULT_ADMIN_ROLE) requiresMultiSig(keccak256("pause")) nonReentrant {
+    function pause() external virtual onlyRole(PAUSER_ROLE) {
         _pause();
     }
     
     /**
-     * @dev Unpause token transfers (multi-sig required)
+     * @dev Unpause all token transfers (requires multi-sig approval)
      */
-    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) requiresMultiSig(keccak256("unpause")) nonReentrant {
+    function unpause() external virtual onlyRole(DEFAULT_ADMIN_ROLE) requiresMultiSig(keccak256("unpause")) nonReentrant {
         _unpause();
     }
     
     /**
-     * @dev Toggle maximum transaction limit
-     * @param enabled Whether to enable the maximum transaction limit
+     * @dev Toggle the maximum transaction limit
+     * @param enabled Whether the limit is enabled
      */
-    function toggleMaxTxLimit(bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) 
-                             requiresMultiSig(keccak256(abi.encodePacked("toggleMaxTxLimit", enabled))) nonReentrant {
+    function setMaxTxLimit(bool enabled) external virtual onlyRole(DEFAULT_ADMIN_ROLE) {
         _isMaxTxLimitEnabled = enabled;
         emit MaxTxLimitToggled(enabled);
     }
     
     /**
-     * @dev Permanently disable maximum transaction limit
+     * @dev Permanently disable the max transaction limit
+     * This is a one-way operation that cannot be reversed
      */
-    function disableMaxTxLimit() external onlyRole(DEFAULT_ADMIN_ROLE) 
-                               requiresMultiSig(keccak256("disableMaxTxLimit")) nonReentrant {
+    function disableMaxTxLimit() external virtual onlyRole(DEFAULT_ADMIN_ROLE) {
         _isMaxTxLimitEnabled = false;
+        _maxTxLimitPermanentlyDisabled = true;
         emit MaxTxLimitDisabled();
     }
     
     /**
-     * @dev Disable early sell tax permanently
+     * @dev Permanently disable early sell tax
+     * This is a one-way operation that cannot be reversed
      */
-    function disableEarlySellTax() external onlyRole(DEFAULT_ADMIN_ROLE) 
-                                 requiresMultiSig(keccak256("disableEarlySellTax")) nonReentrant {
-        // Call the fee manager to disable early sell tax
-        _feeManager._disableEarlySellTax();
+    function disableEarlySellTax() external virtual onlyRole(DEFAULT_ADMIN_ROLE) {
+        _feeManager.disableEarlySellTax();
         emit EarlySellTaxDisabled();
     }
     
@@ -76,41 +81,35 @@ abstract contract DOVEFeatureController is DOVEMultiSigGovernance {
      * @dev Update the charity wallet address
      * @param newCharityWallet New charity wallet address
      */
-    function updateCharityWallet(address newCharityWallet) external onlyRole(DEFAULT_ADMIN_ROLE) 
-                                requiresMultiSig(keccak256(abi.encodePacked("updateCharityWallet", newCharityWallet))) nonReentrant {
+    function updateCharityWallet(address newCharityWallet) external virtual onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newCharityWallet != address(0), "Charity wallet cannot be zero address");
-        
         address oldWallet = _feeManager.getCharityWallet();
-        
-        // Call fee manager to update charity wallet
-        _feeManager._updateCharityWallet(newCharityWallet);
-        
+        _feeManager.updateCharityWallet(newCharityWallet);
         emit CharityWalletUpdated(oldWallet, newCharityWallet);
     }
     
     /**
-     * @dev Set a known DEX address
-     * @param dexAddress Address of the DEX
+     * @dev Set an address as a known DEX
+     * @param dexAddress Address to update
      * @param isDex Whether the address is a DEX
      */
-    function setKnownDex(address dexAddress, bool isDex) external onlyRole(DEFAULT_ADMIN_ROLE) 
-                        requiresMultiSig(keccak256(abi.encodePacked("setKnownDex", dexAddress, isDex))) nonReentrant {
-        // Call fee manager to set known DEX
-        _feeManager._setKnownDex(dexAddress, isDex);
-        
+    function setDexStatus(address dexAddress, bool isDex) external virtual onlyRole(DEFAULT_ADMIN_ROLE) {
+        _feeManager.setDexStatus(dexAddress, isDex);
         emit KnownDexUpdated(dexAddress, isDex);
     }
     
     /**
-     * @dev Exclude an account from fees
-     * @param account Address to exclude
-     * @param excluded Whether to exclude the account
+     * @dev Exclude or include an address from fees
+     * @param account Address to update
+     * @param excluded Whether the address is excluded from fees
      */
-    function setExcludedFromFee(address account, bool excluded) external onlyRole(DEFAULT_ADMIN_ROLE) 
-                               requiresMultiSig(keccak256(abi.encodePacked("setExcludedFromFee", account, excluded))) nonReentrant {
-        // Call fee manager to exclude account from fees
-        _feeManager._setExcludedFromFee(account, excluded);
-        
+    function excludeFromFee(address account, bool excluded) external virtual onlyRole(DEFAULT_ADMIN_ROLE) {
+        _feeManager.excludeFromFee(account, excluded);
         emit ExcludedFromFeeUpdated(account, excluded);
     }
-}
+
+    // Override hasRole to resolve conflict between AccessControl (via DOVEMultiSigGovernance) and IDOVEAdmin
+    function hasRole(bytes32 role, address account) public view virtual override(AccessControl, IDOVEAdmin) returns (bool) {
+        return super.hasRole(role, account);
+    }
+ }
