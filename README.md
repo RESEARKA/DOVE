@@ -50,15 +50,70 @@ dove-token/
 # Run Foundry tests
 forge test
 
-# Run TypeScript tests
-pnpm test
-
-# Run with gas reporting
-forge test --gas-report
-
-# Run slither security analysis
-slither .
+# Run specific tests
+forge test --match-path "test/DOVE.t.sol"
 ```
+
+## O3 Code Analyzer
+
+The project includes an enhanced code analysis tool that leverages OpenAI's GPT-4o to perform comprehensive security audits, performance reviews, and best practice evaluations.
+
+### Setup
+
+1. **API Key Configuration**:
+   Add your OpenAI API key to the `.env` file:
+   ```
+   O3_API_KEY=sk-your-api-key
+   ```
+
+2. **Tool Location**:
+   ```
+   scripts/utils/o3_code_analyzer_enhanced.py
+   ```
+
+### Usage Examples
+
+```bash
+# Analyze a specific file
+python3 scripts/utils/o3_code_analyzer_enhanced.py file contracts/DOVE.sol --focus "security,performance"
+
+# Analyze an entire project directory
+python3 scripts/utils/o3_code_analyzer_enhanced.py project contracts --exclude "tests node_modules"
+
+# Check a specific function
+python3 scripts/utils/o3_code_analyzer_enhanced.py function contracts/DOVEFees.sol getEarlySellTaxFor
+
+# UI component analysis (for frontend projects)
+python3 scripts/utils/o3_code_analyzer_enhanced.py ui components/TokenCard.jsx --focus "accessibility"
+
+# Process multiple files in batch
+python3 scripts/utils/o3_code_analyzer_enhanced.py batch file_list.txt
+```
+
+### Available Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `file` | Analyze a specific file | `file contracts/DOVE.sol` |
+| `function` | Analyze a specific function | `function contracts/DOVE.sol _transfer` |
+| `project` | Analyze an entire directory | `project contracts --exclude "tests"` |
+| `ui` | Analyze UI components | `ui src/components/Button.jsx` |
+| `batch` | Process multiple files | `batch files.txt` |
+| `full` | Legacy command for DOVE analysis | `full` |
+
+### Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--focus` | Target specific areas | `--focus "security,gas,performance"` |
+| `--exclude` | Skip matching patterns | `--exclude "node_modules tests"` |
+| `--severity` | Filter by severity | `--severity "high"` |
+| `--output-dir` | Custom report location | `--output-dir "./reports"` |
+| `--debug` | Enable debug output | `--debug` |
+
+### Reports
+
+Analysis reports are saved in the `analysis_reports/` directory with timestamps in the filename. The tool generates both individual file reports and consolidated summaries for project-wide analysis.
 
 ## Deployment Process
 

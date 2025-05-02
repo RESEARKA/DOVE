@@ -44,9 +44,18 @@ export async function verifyContract(
   } catch (error: any) {
     if (error.message.includes('already verified')) {
       console.log('⚠️ Contract already verified');
+    } else if (error.message.includes('MissingApiKeyError') || error.message.includes('no API token')) {
+      console.log('⚠️ Verification skipped: No API key provided for this network');
+      console.log(`To verify manually later, add your API key to hardhat.config.ts`);
+      console.log(`Contract address: ${contractAddress}`);
+      console.log(`Constructor args: ${JSON.stringify(constructorArguments)}`);
+      // Don't throw error here, allow the deployment to continue
     } else {
       console.error('❌ Error during verification:', error);
-      throw error;
+      // For other types of errors, still don't halt the deployment
+      console.log(`Contract deployed at ${contractAddress} but verification failed.`);
+      console.log(`You can verify manually later using:`);
+      console.log(`npx hardhat verify --network ${hre.network.name} ${contractAddress} ${constructorArguments.join(' ')}`);
     }
   }
 }

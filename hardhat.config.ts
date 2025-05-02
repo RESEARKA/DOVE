@@ -10,6 +10,7 @@ dotenv.config();
 
 // Default values if not provided in environment
 const PRIVATE_KEY = process.env.PRIVATE_KEY || "0000000000000000000000000000000000000000000000000000000000000000";
+const TESTNET_PRIVATE_KEY = process.env.TESTNET_PRIVATE_KEY || PRIVATE_KEY;
 const BASE_SEPOLIA_RPC_URL = process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org";
 const BASE_MAINNET_RPC_URL = process.env.BASE_MAINNET_RPC_URL || "https://mainnet.base.org";
 const BASESCAN_API_KEY = process.env.BASESCAN_API_KEY || "";
@@ -37,7 +38,7 @@ const config: HardhatUserConfig = {
     // Base Sepolia testnet
     baseSepolia: {
       url: BASE_SEPOLIA_RPC_URL,
-      accounts: [PRIVATE_KEY],
+      accounts: [TESTNET_PRIVATE_KEY],
       chainId: 84532,
       gasPrice: "auto",
     },
