@@ -31,6 +31,10 @@ contract DOVEAdmin is Ownable2Step, Pausable, ReentrancyGuard, AccessControl, ID
     mapping(bytes32 => uint256) private _approvalCounts;
     mapping(bytes32 => mapping(address => bool)) private _pendingApprovals;
     
+    // Reentrancy state for multi-signature operations
+    mapping(bytes32 => bool) private _operationInProgress;
+    mapping(bytes32 => bool) private _operationComplete;
+    
     // ================ Modifiers ================
     
     /**
@@ -38,33 +42,15 @@ contract DOVEAdmin is Ownable2Step, Pausable, ReentrancyGuard, AccessControl, ID
      * @param operation The operation identifier (bytes32 hash)
      */
     modifier requiresMultiSig(bytes32 operation) {
-        // Check if operation already has sufficient approvals
-        if (_approvalCounts[operation] >= _requiredApprovals) {
-            // SECURITY: Only reset approvals after successful execution
-            // Store the current approval count to use in the event emission
-            uint256 currentApprovals = _approvalCounts[operation];
-            
-            // Set a flag to indicate this operation is currently being executed
-            // This prevents reentrancy attacks through the same operation
-            bool isBeingExecuted = true;
-            
-            // Execute the function body
-            _;
-            
-            // If we reach this point, the function body completed successfully
-            // Now we can safely reset the approval state
-            if (isBeingExecuted) {
-                // SECURITY: Reset all approval tracking for this operation
-                _approvalCounts[operation] = 0;
-                
-                // Clear all individual approver records for this operation
-                for (uint256 i = 0; i < _approvers.length; i++) {
-                    _pendingApprovals[operation][_approvers[i]] = false;
-                }
-                
-                emit OperationExecuted(operation, currentApprovals);
-            }
-        } else {
+        // SECURITY: Prevent recursive calls to the same operation
+        require(!_operationInProgress[operation], "Reentrant call detected");
+        require(!_operationComplete[operation], "Operation already executed");
+        
+        // CHECKS: Verify if operation already has sufficient approvals
+        uint256 currentApprovalCount = _approvalCounts[operation];
+        bool hasEnoughApprovals = currentApprovalCount >= _requiredApprovals;
+        
+        if (!hasEnoughApprovals) {
             // If not enough approvals, record the approval and revert
             _pendingApprovals[operation][msg.sender] = true;
             _approvalCounts[operation] += 1;
@@ -73,6 +59,31 @@ contract DOVEAdmin is Ownable2Step, Pausable, ReentrancyGuard, AccessControl, ID
             revert(string(abi.encodePacked("Operation ", bytes32ToString(operation), " requires ", 
                 toString(_requiredApprovals - _approvalCounts[operation]), " more approvals")));
         }
+        
+        // EFFECTS (BEFORE FUNCTION EXECUTION):
+        // Mark operation as in progress to prevent reentrancy
+        _operationInProgress[operation] = true;
+        
+        // Store approval count for event emission
+        uint256 approvalCountForEvent = currentApprovalCount;
+        
+        // Reset all approval states before any external calls can occur
+        _approvalCounts[operation] = 0;
+        for (uint256 i = 0; i < _approvers.length; i++) {
+            _pendingApprovals[operation][_approvers[i]] = false;
+        }
+        
+        // INTERACTION: Execute the function body, which must be marked with nonReentrant
+        _;
+        
+        // Post-execution effects - Mark complete ONLY after successful execution
+        _operationComplete[operation] = true;
+        
+        // Emit event after successful execution
+        emit OperationExecuted(operation, approvalCountForEvent);
+        
+        // Mark the operation as complete and reset in-progress flag
+        _operationInProgress[operation] = false;
     }
     
     /**
@@ -265,8 +276,8 @@ contract DOVEAdmin is Ownable2Step, Pausable, ReentrancyGuard, AccessControl, ID
         require(!_feeManager.isLaunched(), "Token already launched");
         
         // SECURITY: Apply checks-effects-interactions pattern
-        // Perform external call last after all validations
-        _feeManager.setLaunched(block.timestamp);
+        // Update internal state first
+        _feeManager.launch();
         emit TokenLaunched(block.timestamp);
     }
     

@@ -37,6 +37,18 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
     // Charity fee percentage (0.5% = 50 basis points)
     uint16 private constant CHARITY_FEE = 50;
     
+    // ================ Roles ================
+    
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    bytes32 public constant ROLE_MANAGER_ROLE = keccak256("ROLE_MANAGER_ROLE");
+    
+    // Multi-signature role management
+    uint256 private _requiredRoleApprovals = 3;  // Default: require 3 admins
+    mapping(bytes32 => mapping(address => bool)) private _roleChangeApprovals;
+    mapping(bytes32 => uint256) private _roleChangeApprovalCounts;
+    
     // ================ State Variables ================
     
     // Fee management module - handles charity fee and early sell tax
@@ -49,58 +61,59 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
     
     /**
      * @dev Constructor initializes the DOVE token with charity wallet
-     * @param initialCharityWallet Address to receive charity fees
+     * @param adminManagerAddress Address of the admin management contract
+     * @param feeManagerAddress Address of the fee management contract
      */
-    constructor(address initialCharityWallet) ERC20("DOVE", "DOVE") ERC20Permit("DOVE") {
-        require(initialCharityWallet != address(0), "Charity wallet cannot be zero address");
+    constructor(
+        address adminManagerAddress,
+        address feeManagerAddress
+    ) ERC20("DOVE Token", "DOVE") ERC20Permit("DOVE") {
+        require(adminManagerAddress != address(0), "Admin manager cannot be zero address");
+        require(feeManagerAddress != address(0), "Fee manager cannot be zero address");
+
+        // Set up contract references
+        adminManager = IDOVEAdmin(adminManagerAddress);
+        feeManager = IDOVEFees(feeManagerAddress);
         
-        // Set up fee management module
-        feeManager = new DOVEFees(initialCharityWallet);
+        // Set up initial token supply (100 billion tokens)
+        uint256 initialSupply = TOTAL_SUPPLY;
         
-        // Set up admin module
-        adminManager = new DOVEAdmin(feeManager);
+        // Initial distribution: 100% to deployer, to be distributed according to tokenomics
+        _balances[msg.sender] = initialSupply;
         
-        // Register this contract as the authorized token address in the fee manager
-        // This establishes the secure connection between the contracts
-        feeManager.setTokenAddress(address(this));
+        // Set max transaction limit (1% of total supply)
+        _maxTxAmount = initialSupply / 100;
         
-        // Verify and lock the token address to prevent further changes
-        // Calculate verification code using contract address and chain ID for extra security
-        bytes32 verificationCode = keccak256(abi.encodePacked("VERIFY_TOKEN_ADDRESS", address(this), block.chainid));
-        feeManager.verifyTokenAddress(verificationCode);
+        // Verify that owner of this contract controls the manager contracts
+        // This prevents accidental misconfiguration
+        DOVEAdmin adminManagerContract = DOVEAdmin(adminManagerAddress);
+        DOVEFees feeManagerContract = DOVEFees(feeManagerAddress);
         
-        // Transfer ownership of modules to token deployer with proper verification
-        // Rigorous checking ensures that ownership transfers are completed successfully
-        // We need to verify these transfers to ensure the deployer has full control
-        address deployerAddress = msg.sender;
+        // SECURITY: Use direct ownership checks instead of transfers to avoid reentrancy
+        // Check that the deployer is the owner of both manager contracts
+        require(adminManagerContract.owner() == msg.sender, "Deployer must own admin manager");
+        require(feeManagerContract.owner() == msg.sender, "Deployer must own fee manager");
         
-        // Transfer ownership of feeManager with verification
-        try feeManager.transferOwnership(deployerAddress) {
-            // Explicitly verify ownership was transferred correctly
-            address newFeeOwner = feeManager.owner();
-            require(newFeeOwner == deployerAddress, "Fee manager ownership transfer failed verification");
-        } catch {
-            // This should never happen with a newly deployed contract
-            revert("Fee manager ownership transfer failed");
-        }
+        // Verify that fee manager has correct token role setup
+        bytes32 tokenRole = feeManagerContract.TOKEN_ROLE();
+        require(!feeManagerContract.hasRole(tokenRole, address(0)), "Token role not properly initialized");
         
-        // Transfer ownership of adminManager with verification
-        try adminManager.transferOwnership(deployerAddress) {
-            // Explicitly verify ownership was transferred correctly
-            address newAdminOwner = adminManager.owner();
-            require(newAdminOwner == deployerAddress, "Admin manager ownership transfer failed verification");
-        } catch {
-            // This should never happen with a newly deployed contract
-            revert("Admin manager ownership transfer failed");
-        }
+        // Register this token contract with the fee manager using the secure verification mechanism
+        feeManagerContract.setTokenAddress(address(this));
+        bytes32 confirmationCode = keccak256(abi.encodePacked("VERIFY_TOKEN_ADDRESS", address(this), block.chainid));
+        feeManagerContract.verifyTokenAddress(confirmationCode);
         
-        // Mint total supply to deployer
-        _mint(deployerAddress, TOTAL_SUPPLY);
+        // Set up access control roles - give deployer all roles to start
+        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _setupRole(PAUSER_ROLE, msg.sender);
+        _setupRole(MINTER_ROLE, msg.sender);
+        _setupRole(OPERATOR_ROLE, msg.sender);
+        _setupRole(ROLE_MANAGER_ROLE, msg.sender);
         
-        // Exclude owner, token contract, and charity wallet from fees
-        feeManager._setExcludedFromFee(deployerAddress, true);
-        feeManager._setExcludedFromFee(address(this), true);
-        feeManager._setExcludedFromFee(initialCharityWallet, true);
+        // Token is deployed but not yet launched - this happens as a separate step
+        
+        // Initial set up complete
+        emit Transfer(address(0), msg.sender, initialSupply);
     }
     
     // ================ External View Functions ================
@@ -305,8 +318,10 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
         require(recipient != address(0), "ERC20: transfer to the zero address");
         require(amount > 0, "ERC20: transfer amount must be greater than zero");
         
-        // Reject transfers when paused
-        require(!adminManager.paused(), "ERC20Pausable: token transfer while paused");
+        // Reject transfers when paused, unless the sender has the OPERATOR_ROLE
+        if (adminManager.paused()) {
+            require(hasRole(OPERATOR_ROLE, msg.sender), "ERC20Pausable: transfers paused and caller is not an operator");
+        }
         
         // Check for max transaction limit if enabled
         if (adminManager.isMaxTxLimitEnabled() && !feeManager.isExcludedFromFee(sender) && !feeManager.isExcludedFromFee(recipient)) {
@@ -364,4 +379,129 @@ contract DOVE is ERC20Permit, ReentrancyGuard, IDOVE, AccessControl {
             feeManager.updateAcquisitionTimestamp(recipient);
         }
     }
+    
+    /**
+     * @dev Multi-signature requirement for granting roles
+     * @param role The role to grant
+     * @param account The account to grant the role to
+     */
+    function grantRole(bytes32 role, address account) public override nonReentrant {
+        // Only role managers or admin role can grant roles
+        require(hasRole(ROLE_MANAGER_ROLE, msg.sender) || hasRole(DEFAULT_ADMIN_ROLE, msg.sender), 
+            "Must have role manager or admin role");
+        
+        // Generate a unique operation identifier
+        bytes32 operation = keccak256(abi.encodePacked("grantRole", role, account));
+        
+        // Ensure caller hasn't already approved this operation
+        require(!_roleChangeApprovals[operation][msg.sender], "Already approved this role change");
+        
+        // Record this approval
+        _roleChangeApprovals[operation][msg.sender] = true;
+        _roleChangeApprovalCounts[operation]++;
+        
+        emit RoleChangeApprovalAdded(operation, msg.sender, role, account, 
+            _roleChangeApprovalCounts[operation], _requiredRoleApprovals);
+        
+        // If we have enough approvals, execute the role grant
+        if (_roleChangeApprovalCounts[operation] >= _requiredRoleApprovals) {
+            // Save approval count for event
+            uint256 approvalCount = _roleChangeApprovalCounts[operation];
+            
+            // Reset approvals
+            _roleChangeApprovalCounts[operation] = 0;
+            
+            // Grant the role
+            super.grantRole(role, account);
+            
+            // Emit completion event
+            emit RoleChangeExecuted(operation, role, account, approvalCount);
+        } else {
+            // Not enough approvals yet
+            revert(string(abi.encodePacked(
+                "Role grant requires ", 
+                toString(_requiredRoleApprovals - _roleChangeApprovalCounts[operation]),
+                " more approvals"
+            )));
+        }
+    }
+    
+    /**
+     * @dev Multi-signature requirement for revoking roles
+     * @param role The role to revoke
+     * @param account The account to revoke the role from
+     */
+    function revokeRole(bytes32 role, address account) public override nonReentrant {
+        // Only role managers or admin role can revoke roles
+        require(hasRole(ROLE_MANAGER_ROLE, msg.sender) || hasRole(DEFAULT_ADMIN_ROLE, msg.sender), 
+            "Must have role manager or admin role");
+        
+        // Generate a unique operation identifier
+        bytes32 operation = keccak256(abi.encodePacked("revokeRole", role, account));
+        
+        // Ensure caller hasn't already approved this operation
+        require(!_roleChangeApprovals[operation][msg.sender], "Already approved this role change");
+        
+        // Record this approval
+        _roleChangeApprovals[operation][msg.sender] = true;
+        _roleChangeApprovalCounts[operation]++;
+        
+        emit RoleChangeApprovalAdded(operation, msg.sender, role, account, 
+            _roleChangeApprovalCounts[operation], _requiredRoleApprovals);
+        
+        // If we have enough approvals, execute the role revocation
+        if (_roleChangeApprovalCounts[operation] >= _requiredRoleApprovals) {
+            // Save approval count for event
+            uint256 approvalCount = _roleChangeApprovalCounts[operation];
+            
+            // Reset approvals
+            _roleChangeApprovalCounts[operation] = 0;
+            
+            // Revoke the role
+            super.revokeRole(role, account);
+            
+            // Emit completion event
+            emit RoleChangeExecuted(operation, role, account, approvalCount);
+        } else {
+            // Not enough approvals yet
+            revert(string(abi.encodePacked(
+                "Role revocation requires ", 
+                toString(_requiredRoleApprovals - _roleChangeApprovalCounts[operation]),
+                " more approvals"
+            )));
+        }
+    }
+    
+    /**
+     * @dev Helper function to convert uint to string for better error messages
+     * @param value The uint to convert
+     * @return string representation
+     */
+    function toString(uint256 value) internal pure returns (string memory) {
+        if (value == 0) {
+            return "0";
+        }
+        
+        uint256 temp = value;
+        uint256 digits;
+        
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+        
+        bytes memory buffer = new bytes(digits);
+        
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
+        }
+        
+        return string(buffer);
+    }
+    
+    // ================ Events ================
+    event RoleChangeApprovalAdded(bytes32 indexed operation, address indexed approver, bytes32 indexed role, address account, uint256 currentApprovals, uint256 requiredApprovals);
+    event RoleChangeExecuted(bytes32 indexed operation, bytes32 indexed role, address account, uint256 approvalCount);
 }

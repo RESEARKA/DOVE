@@ -93,6 +93,11 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
     mapping(bytes32 => uint256) private _emergencyApprovalCounts;
     uint256 private _requiredEmergencyApprovals = 2; // Default: require 2 emergency admins
     
+    // Multi-signature for role management
+    mapping(bytes32 => mapping(address => bool)) private _roleChangeApprovals;
+    mapping(bytes32 => uint256) private _roleChangeApprovalCounts;
+    uint256 private _requiredRoleChangeApprovals = 2; // Default: 2 admins required
+    
     // ================ Events ================
     
     event TokenLaunched(uint256 launchTimestamp);
@@ -110,6 +115,9 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
     event EmergencyApprovalRecorded(bytes32 indexed operation, address indexed approver, uint256 currentApprovals, uint256 requiredApprovals);
     event EmergencyActionExecuted(bytes32 indexed operation, address indexed executor, uint256 approvalCount);
     event RequiredEmergencyApprovalsUpdated(uint256 required);
+    event RoleChangeApprovalRecorded(bytes32 indexed operation, address indexed approver, uint256 currentApprovals, uint256 requiredApprovals);
+    event RoleChangeExecuted(bytes32 indexed operation, address indexed executor, uint256 approvalCount);
+    event RequiredRoleChangeApprovalsUpdated(uint256 required);
     
     // ================ Constructor ================
     
@@ -154,7 +162,11 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
      * @notice Can only be called by the original registrar (owner who set the token address)
      * @param newTokenAddress New token contract address
      */
-    function initiateTokenAddressRecovery(address newTokenAddress) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function initiateTokenAddressRecovery(address newTokenAddress) 
+        external 
+        nonReentrant
+        requiresMultipleAdminApprovals(keccak256(abi.encodePacked("initiateTokenAddressRecovery", newTokenAddress)))
+    {
         // Only the original registrar (owner at time of registration) can recover
         require(msg.sender == _tokenRegistrar, "Only original registrar can recover");
         require(newTokenAddress != address(0), "Token address cannot be zero");
@@ -485,6 +497,184 @@ contract DOVEFees is Ownable2Step, AccessControl, ReentrancyGuard, IDOVEFees {
         
         _requiredEmergencyApprovals = required;
         emit RequiredEmergencyApprovalsUpdated(required);
+    }
+    
+    /**
+     * @dev Modifier to enforce multi-signature role management
+     * @param operation Hash representing the role operation
+     */
+    modifier requiresMultipleAdminApprovals(bytes32 operation) {
+        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Not an admin");
+        
+        // Check if operation already has sufficient approvals
+        if (_roleChangeApprovalCounts[operation] >= _requiredRoleChangeApprovals) {
+            // Store approval count for event
+            uint256 currentApprovals = _roleChangeApprovalCounts[operation];
+            
+            // Reset before execution to prevent reentrancy
+            _roleChangeApprovalCounts[operation] = 0;
+            
+            // Execute function
+            _;
+            
+            // Emit event after successful execution
+            emit RoleChangeExecuted(operation, msg.sender, currentApprovals);
+        } else {
+            // Record this approval
+            if (!_roleChangeApprovals[operation][msg.sender]) {
+                _roleChangeApprovals[operation][msg.sender] = true;
+                _roleChangeApprovalCounts[operation] += 1;
+                
+                emit RoleChangeApprovalRecorded(
+                    operation, 
+                    msg.sender, 
+                    _roleChangeApprovalCounts[operation],
+                    _requiredRoleChangeApprovals
+                );
+            }
+            
+            revert(string(abi.encodePacked(
+                "Role change requires ", 
+                toString(_requiredRoleChangeApprovals - _roleChangeApprovalCounts[operation]),
+                " more approvals"
+            )));
+        }
+    }
+    
+    /**
+     * @dev Set the number of required approvals for role changes
+     * @param required Number of required approvals
+     */
+    function setRequiredRoleChangeApprovals(uint256 required) external onlyRole(DEFAULT_ADMIN_ROLE) 
+        requiresMultipleAdminApprovals(keccak256("setRequiredRoleChangeApprovals"))
+    {
+        require(required >= 2, "Minimum 2 approvals required for security");
+        _requiredRoleChangeApprovals = required;
+        emit RequiredRoleChangeApprovalsUpdated(required);
+    }
+    
+    /**
+     * @dev Override the grantRole function to add multi-signature requirement for sensitive roles
+     * @param role The role being granted
+     * @param account The account receiving the role
+     */
+    function grantRole(bytes32 role, address account) public override(AccessControl, IAccessControl) {
+        // For sensitive roles, require multiple admin approvals
+        if (role == EMERGENCY_ADMIN_ROLE || role == FEE_MANAGER_ROLE) {
+            bytes32 operation = keccak256(abi.encodePacked("grantRole", role, account));
+            
+            // Check if sender is admin 
+            require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Not an admin");
+            
+            // SECURITY: Ensure the same admin cannot approve multiple times
+            require(!_roleChangeApprovals[operation][msg.sender], "Already approved this role change");
+            
+            // Record this unique approval
+            _roleChangeApprovals[operation][msg.sender] = true;
+            _roleChangeApprovalCounts[operation] += 1;
+            
+            // Emit approval event
+            emit RoleChangeApprovalRecorded(
+                operation, 
+                msg.sender, 
+                _roleChangeApprovalCounts[operation],
+                _requiredRoleChangeApprovals
+            );
+            
+            // Check if operation has sufficient approvals from unique admins
+            if (_roleChangeApprovalCounts[operation] >= _requiredRoleChangeApprovals) {
+                // Store approval count for event
+                uint256 currentApprovals = _roleChangeApprovalCounts[operation];
+                
+                // Reset before execution to prevent reentrancy
+                _roleChangeApprovalCounts[operation] = 0;
+                
+                // Clear all individual approvals for this operation
+                uint256 DEFAULT_ADMIN_ROLE_COUNT = getRoleMemberCount(DEFAULT_ADMIN_ROLE);
+                for (uint256 i = 0; i < DEFAULT_ADMIN_ROLE_COUNT; i++) {
+                    address admin = getRoleMember(DEFAULT_ADMIN_ROLE, i);
+                    _roleChangeApprovals[operation][admin] = false;
+                }
+                
+                // Grant the role
+                super.grantRole(role, account);
+                
+                // Emit event after successful execution
+                emit RoleChangeExecuted(operation, msg.sender, currentApprovals);
+            } else {
+                // Not enough approvals yet
+                revert(string(abi.encodePacked(
+                    "Role grant requires ", 
+                    toString(_requiredRoleChangeApprovals - _roleChangeApprovalCounts[operation]),
+                    " more approvals"
+                )));
+            }
+        } else {
+            // For non-sensitive roles, use the standard behavior
+            super.grantRole(role, account);
+        }
+    }
+    
+    /**
+     * @dev Override the revokeRole function to add multi-signature requirement for sensitive roles
+     * @param role The role being revoked
+     * @param account The account losing the role
+     */
+    function revokeRole(bytes32 role, address account) public override(AccessControl, IAccessControl) {
+        // For sensitive roles, require multiple admin approvals
+        if (role == EMERGENCY_ADMIN_ROLE || role == FEE_MANAGER_ROLE) {
+            bytes32 operation = keccak256(abi.encodePacked("revokeRole", role, account));
+            
+            // Check if sender is admin
+            require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Not an admin");
+            
+            // SECURITY: Ensure the same admin cannot approve multiple times
+            require(!_roleChangeApprovals[operation][msg.sender], "Already approved this role change");
+            
+            // Record this unique approval
+            _roleChangeApprovals[operation][msg.sender] = true;
+            _roleChangeApprovalCounts[operation] += 1;
+            
+            // Emit approval event
+            emit RoleChangeApprovalRecorded(
+                operation, 
+                msg.sender, 
+                _roleChangeApprovalCounts[operation],
+                _requiredRoleChangeApprovals
+            );
+            
+            // Check if operation has sufficient approvals from unique admins
+            if (_roleChangeApprovalCounts[operation] >= _requiredRoleChangeApprovals) {
+                // Store approval count for event
+                uint256 currentApprovals = _roleChangeApprovalCounts[operation];
+                
+                // Reset before execution to prevent reentrancy
+                _roleChangeApprovalCounts[operation] = 0;
+                
+                // Clear all individual approvals for this operation
+                uint256 DEFAULT_ADMIN_ROLE_COUNT = getRoleMemberCount(DEFAULT_ADMIN_ROLE);
+                for (uint256 i = 0; i < DEFAULT_ADMIN_ROLE_COUNT; i++) {
+                    address admin = getRoleMember(DEFAULT_ADMIN_ROLE, i);
+                    _roleChangeApprovals[operation][admin] = false;
+                }
+                
+                // Revoke the role
+                super.revokeRole(role, account);
+                
+                // Emit event after successful execution
+                emit RoleChangeExecuted(operation, msg.sender, currentApprovals);
+            } else {
+                // Not enough approvals yet
+                revert(string(abi.encodePacked(
+                    "Role revocation requires ", 
+                    toString(_requiredRoleChangeApprovals - _roleChangeApprovalCounts[operation]),
+                    " more approvals"
+                )));
+            }
+        } else {
+            // For non-sensitive roles, use the standard behavior
+            super.revokeRole(role, account);
+        }
     }
     
     /**
