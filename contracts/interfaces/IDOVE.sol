@@ -2,8 +2,9 @@
 pragma solidity 0.8.24;
 
 /**
- * @title DOVE Token Interface
- * @dev Interface for the DOVE token contract
+ * @title IDOVE Interface
+ * @dev Interface for the DOVE token with action methods only
+ * View functions are now in IDOVEInfo interface
  */
 interface IDOVE {
     // ================ Events ================
@@ -11,7 +12,7 @@ interface IDOVE {
     event Launch(uint256 timestamp);
     event CharityWalletUpdated(address indexed oldWallet, address indexed newWallet);
     event ExcludedFromFeeUpdated(address indexed account, bool excluded);
-    event DexStatusUpdated(address indexed dexAddress, bool isDex);
+    event DexStatusUpdated(address indexed dexAddress, bool dexStatus);
     event EarlySellTaxDisabled();
     event MaxTxLimitDisabled();
     
@@ -48,9 +49,9 @@ interface IDOVE {
     /**
      * @dev Set a DEX address status
      * @param dexAddress Address to set status for
-     * @param isDex Whether the address is a DEX
+     * @param dexStatus Whether the address is a DEX
      */
-    function setDexStatus(address dexAddress, bool isDex) external;
+    function setDexStatus(address dexAddress, bool dexStatus) external;
     
     /**
      * @dev Disable early sell tax permanently
@@ -96,33 +97,12 @@ interface IDOVE {
     /**
      * @dev Emit DEX status updated event
      * @param dexAddress Address that was updated
-     * @param isDex Whether the address is a DEX
+     * @param dexStatus Whether the address is a DEX
      */
-    function emitDexStatusUpdated(address dexAddress, bool isDex) external;
+    function emitDexStatusUpdated(address dexAddress, bool dexStatus) external;
     
     /**
      * @dev Emit early sell tax disabled event
      */
     function emitEarlySellTaxDisabled() external;
-    
-    // ================ View Functions ================
-    
-    /**
-     * @dev Get charity fee percentage
-     * @return The charity fee percentage (in basis points)
-     */
-    function getCharityFee() external view returns (uint16);
-    
-    /**
-     * @dev Get charity wallet address
-     * @return The charity wallet address
-     */
-    function getCharityWallet() external view returns (address);
-    
-    /**
-     * @dev Check if an address is excluded from fees
-     * @param account Address to check
-     * @return Whether the address is excluded from fees
-     */
-    function isExcludedFromFee(address account) external view returns (bool);
 }

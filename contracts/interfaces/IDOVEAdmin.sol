@@ -1,128 +1,109 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+import "@openzeppelin/contracts/access/IAccessControl.sol";
+
 /**
- * @title DOVE Admin Interface
- * @dev Interface for DOVE token administration functionality
- * This interface centralizes all admin and configuration operations
+ * @title IDOVEAdmin
+ * @dev Interface for DOVEAdmin contract
  */
-interface IDOVEAdmin {
-    /**
-     * @dev Role constants
-     * These roles control access to administrative functions
-     */
-    function DEFAULT_ADMIN_ROLE() external view returns (bytes32);
-    function FEE_MANAGER_ROLE() external view returns (bytes32);
-    function EMERGENCY_ADMIN_ROLE() external view returns (bytes32);
-    function PAUSER_ROLE() external view returns (bytes32);
+interface IDOVEAdmin is IAccessControl {
+    // ================ Function Declarations ================
     
     /**
-     * @dev Launch the token, enabling transfers
-     * @notice Requires DEFAULT_ADMIN_ROLE
-     * Can only be called once by admin
+     * @dev Set the DOVE token address
+     * @param tokenAddress Address of the DOVE token
+     */
+    function setTokenAddress(address tokenAddress) external;
+    
+    /**
+     * @dev Launch the DOVE token
      */
     function launch() external;
     
     /**
-     * @dev Set charity wallet address
-     * @param newCharityWallet New charity wallet address
-     * @notice Requires FEE_MANAGER_ROLE
+     * @dev Pause the DOVE token
+     */
+    function pause() external;
+    
+    /**
+     * @dev Set the charity wallet address
+     * @param newCharityWallet Address of the new charity wallet
      */
     function setCharityWallet(address newCharityWallet) external;
     
     /**
-     * @dev Exclude or include an address from fees
-     * @param account Address to update
-     * @param excluded Whether to exclude from fees
-     * @notice Requires DEFAULT_ADMIN_ROLE or FEE_MANAGER_ROLE
+     * @dev Exclude an address from fees
+     * @param account Address to exclude from fees
+     * @param excluded Whether the address is excluded
      */
     function excludeFromFee(address account, bool excluded) external;
     
     /**
      * @dev Set a DEX address status
      * @param dexAddress Address to set status for
-     * @param isDex Whether the address is a DEX
-     * @notice Requires DEFAULT_ADMIN_ROLE
+     * @param dexStatus Whether the address is a DEX
      */
-    function setDexStatus(address dexAddress, bool isDex) external;
+    function setDexStatus(address dexAddress, bool dexStatus) external;
     
     /**
-     * @dev Disable early sell tax permanently (emergency function)
-     * @notice Requires EMERGENCY_ADMIN_ROLE
-     * Can only be called by emergency admin
+     * @dev Disable the early sell tax
      */
     function disableEarlySellTax() external;
     
     /**
-     * @dev Disable max transaction limit permanently
-     * @notice Requires DEFAULT_ADMIN_ROLE
-     * Can only be called by admin
+     * @dev Disable the max transaction limit
      */
     function disableMaxTxLimit() external;
     
     /**
-     * @dev Set token address
-     * @param tokenAddress Address of the DOVE token
-     * @notice Requires DEFAULT_ADMIN_ROLE
+     * @dev Get the DOVE token address
+     * @return Address of the DOVE token
      */
-    function setTokenAddress(address tokenAddress) external;
+    function getTokenAddress() external view returns (address);
+    
+    // ================ Events ================
     
     /**
-     * @dev Pause all token transfers
-     * @notice Requires PAUSER_ROLE
-     * Can only be called by pauser role
+     * @dev Emitted when the token address is set
+     * @param tokenAddress Address of the token
      */
-    function pause() external;
+    event TokenAddressSet(address indexed tokenAddress);
     
     /**
-     * @dev Unpause all token transfers
-     * @notice Requires PAUSER_ROLE
-     * Can only be called by pauser role
+     * @dev Emitted when the charity wallet is changed
+     * @param oldWallet Previous charity wallet address
+     * @param newWallet New charity wallet address
      */
-    function unpause() external;
+    event CharityWalletUpdated(address indexed oldWallet, address indexed newWallet);
     
     /**
-     * @dev Grant a role to an account
-     * @param role Role to grant
-     * @param account Account to grant role to
-     * @notice Requires admin of the role (typically DEFAULT_ADMIN_ROLE)
+     * @dev Emitted when an address is excluded from fees
+     * @param account Address that was excluded
+     * @param isExcluded Whether the address is excluded
      */
-    function grantRole(bytes32 role, address account) external;
+    event ExcludedFromFeeUpdated(address indexed account, bool isExcluded);
     
     /**
-     * @dev Revoke a role from an account
-     * @param role Role to revoke
-     * @param account Account to revoke role from
-     * @notice Requires admin of the role (typically DEFAULT_ADMIN_ROLE)
+     * @dev Emitted when a DEX address status is set
+     * @param dexAddress Address that was updated
+     * @param dexStatus Whether the address is a DEX
      */
-    function revokeRole(bytes32 role, address account) external;
+    event DexStatusUpdated(address indexed dexAddress, bool dexStatus);
     
     /**
-     * @dev Renounce a role from caller
-     * @param role Role to renounce
-     * @param account Account renouncing role (must be caller)
-     * @notice Can only be called by the account itself to renounce a role
+     * @dev Emitted when the early sell tax is disabled
      */
-    function renounceRole(bytes32 role, address account) external;
-    
-    /**
-     * @dev Check if an account has a role
-     * @param role Role to check
-     * @param account Account to check
-     * @return True if account has role
-     */
-    function hasRole(bytes32 role, address account) external view returns (bool);
-    
-    /**
-     * @dev Events emitted by the DOVE Admin
-     */
-    event CharityWalletUpdated(address oldWallet, address newWallet);
-    event FeeExclusionUpdated(address indexed account, bool excluded);
-    event DexStatusUpdated(address indexed dexAddress, bool isDex);
     event EarlySellTaxDisabled();
+    
+    /**
+     * @dev Emitted when the max transaction limit is disabled
+     */
     event MaxTxLimitDisabled();
-    event TokenAddressSet(address tokenAddress);
-    event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender);
-    event RoleRevoked(bytes32 indexed role, address indexed account, address indexed sender);
-    event RoleRenounced(bytes32 indexed role, address indexed account);
+    
+    /**
+     * @dev Emitted when the token is launched
+     * @param timestamp Time of launch
+     */
+    event Launch(uint256 timestamp);
 }

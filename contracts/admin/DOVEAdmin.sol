@@ -3,8 +3,8 @@ pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "../interfaces/IDOVEAdmin.sol";
 import "../interfaces/IDOVE.sol";
+import "../interfaces/IDOVEAdmin.sol";
 
 /**
  * @title DOVE Admin Contract
@@ -15,10 +15,9 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
     // ================ Role Constants ================
     
     // Role definitions
-    bytes32 public constant override DEFAULT_ADMIN_ROLE = 0x00;
-    bytes32 public constant override FEE_MANAGER_ROLE = keccak256("FEE_MANAGER_ROLE");
-    bytes32 public constant override EMERGENCY_ADMIN_ROLE = keccak256("EMERGENCY_ADMIN_ROLE");
-    bytes32 public constant override PAUSER_ROLE = keccak256("PAUSER_ROLE");
+    bytes32 public constant FEE_MANAGER_ROLE = keccak256("FEE_MANAGER_ROLE");
+    bytes32 public constant EMERGENCY_ADMIN_ROLE = keccak256("EMERGENCY_ADMIN_ROLE");
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     
     // ================ State Variables ================
     
@@ -100,7 +99,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
      * @dev Launch the token, enabling transfers
      * @notice Requires DEFAULT_ADMIN_ROLE
      */
-    function launch() external override nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
+    function launch() external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
         // Create operation ID using nonce for uniqueness
         bytes32 operationId = keccak256(abi.encodePacked("launch", msg.sender, _globalNonce++));
         
@@ -125,7 +124,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
      * @param newCharityWallet New charity wallet address
      * @notice Requires FEE_MANAGER_ROLE
      */
-    function setCharityWallet(address newCharityWallet) external override nonReentrant onlyRole(FEE_MANAGER_ROLE) notLocked {
+    function setCharityWallet(address newCharityWallet) external nonReentrant onlyRole(FEE_MANAGER_ROLE) notLocked {
         require(address(_doveToken) != address(0), "Token address not set");
         require(newCharityWallet != address(0), "New charity wallet cannot be zero address");
         _doveToken.setCharityWallet(newCharityWallet);
@@ -137,7 +136,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
      * @param excluded Whether to exclude from fees
      * @notice Requires DEFAULT_ADMIN_ROLE or FEE_MANAGER_ROLE
      */
-    function excludeFromFee(address account, bool excluded) external override nonReentrant notLocked {
+    function excludeFromFee(address account, bool excluded) external nonReentrant notLocked {
         require(
             hasRole(DEFAULT_ADMIN_ROLE, msg.sender) || 
             hasRole(FEE_MANAGER_ROLE, msg.sender),
@@ -151,20 +150,20 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
     /**
      * @dev Set a DEX address status
      * @param dexAddress Address to set status for
-     * @param isDex Whether the address is a DEX
+     * @param dexStatus Whether the address is a DEX
      * @notice Requires DEFAULT_ADMIN_ROLE
      */
-    function setDexStatus(address dexAddress, bool isDex) external override nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
+    function setDexStatus(address dexAddress, bool dexStatus) external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
         require(address(_doveToken) != address(0), "Token address not set");
         require(dexAddress != address(0), "DEX address cannot be zero address");
-        _doveToken.setDexStatus(dexAddress, isDex);
+        _doveToken.setDexStatus(dexAddress, dexStatus);
     }
     
     /**
      * @dev Disable early sell tax permanently (emergency function)
      * @notice Requires EMERGENCY_ADMIN_ROLE
      */
-    function disableEarlySellTax() external override nonReentrant onlyRole(EMERGENCY_ADMIN_ROLE) {
+    function disableEarlySellTax() external nonReentrant onlyRole(EMERGENCY_ADMIN_ROLE) {
         require(address(_doveToken) != address(0), "Token address not set");
         _doveToken.disableEarlySellTax();
     }
@@ -173,7 +172,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
      * @dev Disable max transaction limit permanently
      * @notice Requires DEFAULT_ADMIN_ROLE
      */
-    function disableMaxTxLimit() external override nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
+    function disableMaxTxLimit() external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
         // Create operation ID using nonce for uniqueness
         bytes32 operationId = keccak256(abi.encodePacked("disableMaxTxLimit", msg.sender, _globalNonce++));
         
@@ -197,7 +196,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
      * @param tokenAddress Address of the DOVE token
      * @notice Requires DEFAULT_ADMIN_ROLE
      */
-    function setTokenAddress(address tokenAddress) external override nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
+    function setTokenAddress(address tokenAddress) external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
         require(tokenAddress != address(0), "Token address cannot be zero address");
         require(address(_doveToken) == address(0), "Token address already set");
         _doveToken = IDOVE(tokenAddress);
@@ -208,7 +207,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
      * @dev Pause all token transfers
      * @notice Requires PAUSER_ROLE
      */
-    function pause() external override nonReentrant onlyRole(PAUSER_ROLE) {
+    function pause() external nonReentrant onlyRole(PAUSER_ROLE) {
         require(address(_doveToken) != address(0), "Token address not set");
         _doveToken.pause();
     }
@@ -217,7 +216,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
      * @dev Unpause all token transfers
      * @notice Requires PAUSER_ROLE
      */
-    function unpause() external override nonReentrant onlyRole(PAUSER_ROLE) {
+    function unpause() external nonReentrant onlyRole(PAUSER_ROLE) {
         require(address(_doveToken) != address(0), "Token address not set");
         _doveToken.unpause();
     }
@@ -242,22 +241,13 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
         emit OperationCancelled(operationId);
     }
     
-    // Override inherited role management functions from IDOVEAdmin
-    function grantRole(bytes32 role, address account) external override nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) {
-        _grantRole(role, account);
-    }
+    // ================ View Functions ================
     
-    function revokeRole(bytes32 role, address account) external override nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) {
-        _revokeRole(role, account);
-    }
-    
-    function renounceRole(bytes32 role, address account) external override nonReentrant {
-        require(account == msg.sender, "Can only renounce roles for self");
-        _revokeRole(role, account);
-        emit RoleRenounced(role, account);
-    }
-    
-    function hasRole(bytes32 role, address account) public view override(AccessControl, IDOVEAdmin) returns (bool) {
-        return super.hasRole(role, account);
+    /**
+     * @dev Get the DOVE token address
+     * @return Address of the DOVE token
+     */
+    function getTokenAddress() external view returns (address) {
+        return address(_doveToken);
     }
 }

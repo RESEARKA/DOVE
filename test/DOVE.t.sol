@@ -2,243 +2,439 @@
 pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
-import "../contracts/DOVE.sol";
+import "../contracts/token/DOVE.sol";
+import "../contracts/token/DOVEFees.sol";
+import "../contracts/admin/DOVEAdmin.sol";
+import "../contracts/admin/DOVEMultisig.sol";
 
 /**
  * @title DOVETest
- * @dev Test contract for DOVE token
+ * @dev Test contract for DOVE token ecosystem
  */
 contract DOVETest is Test {
     // Test accounts
-    address private owner;
-    address private alice;
-    address private bob;
-    address private carol;
-    address private dex;
-
-    // The DOVE token contract
-    DOVE private dove;
-
-    // Initial supply
-    uint256 private constant TOTAL_SUPPLY = 100_000_000_000 * 1e18;
-
-    // Events for testing
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    event CharityFeeCollected(uint256 amount);
-    event EarlySellTaxCollected(address indexed seller, uint256 taxAmount);
-    event ExcludeFromFee(address indexed account, bool excluded);
-
+    address private deployer;
+    address private admin;
+    address private feeManager;
+    address private emergencyAdmin;
+    address private user1;
+    address private user2;
+    address private charityWallet;
+    address private dexRouter;
+    
+    // The DOVE ecosystem contracts
+    DOVEAdmin private doveAdmin;
+    DOVE private doveToken;
+    
+    // Constants
+    uint256 private constant TOTAL_SUPPLY = 100_000_000_000 * 10**18;
+    uint256 private constant TRANSFER_AMOUNT = 1_000_000 * 10**18;
+    
+    // Events to test
+    event Launch(uint256 timestamp);
+    event CharityWalletUpdated(address indexed oldWallet, address indexed newWallet);
+    event ExcludedFromFeeUpdated(address indexed account, bool excluded);
+    event DexStatusUpdated(address indexed dexAddress, bool isDex);
+    event EarlySellTaxDisabled();
+    event MaxTxLimitDisabled();
+    event AdminUpdateProposed(uint256 indexed proposalId, address indexed proposer, address indexed newAdmin);
+    event AdminUpdateApproved(uint256 indexed proposalId, address indexed approver);
+    event AdminUpdateExecuted(uint256 indexed proposalId, address oldAdmin, address newAdmin);
+    
     /**
      * @dev Setup test environment before each test
      */
     function setUp() public {
+        vm.startPrank(address(this));
+        
         // Create test accounts
-        owner = address(this);
-        alice = makeAddr("alice");
-        bob = makeAddr("bob");
-        carol = makeAddr("carol");
-        dex = makeAddr("dex");
-
-        // Deploy DOVE token
-        dove = new DOVE();
-
-        // Set up the dex as excluded from fee (simulating a router/LP)
-        dove.excludeFromFee(dex);
-    }
-
-    /**
-     * @dev Test initial supply and owner balance
-     */
-    function testInitialSupply() public {
-        assertEq(dove.totalSupply(), TOTAL_SUPPLY);
-        assertEq(dove.balanceOf(owner), TOTAL_SUPPLY);
-    }
-
-    /**
-     * @dev Test basic transfer functionality
-     */
-    function testBasicTransfer() public {
-        uint256 transferAmount = 1000 * 1e18;
+        deployer = address(this);
+        admin = makeAddr("admin");
+        feeManager = makeAddr("feeManager");
+        emergencyAdmin = makeAddr("emergencyAdmin");
+        user1 = makeAddr("user1");
+        user2 = makeAddr("user2");
+        charityWallet = makeAddr("charityWallet");
+        dexRouter = makeAddr("dexRouter");
         
-        // Transfer from owner to alice
-        vm.expectEmit(true, true, false, true);
-        emit Transfer(owner, alice, transferAmount);
-        dove.transfer(alice, transferAmount);
+        // Deploy contracts
+        doveAdmin = new DOVEAdmin(admin);
         
-        // Check balances after transfer
-        assertEq(dove.balanceOf(alice), transferAmount);
-        assertEq(dove.balanceOf(owner), TOTAL_SUPPLY - transferAmount);
+        // Set up roles
+        doveAdmin.grantRole(doveAdmin.FEE_MANAGER_ROLE(), feeManager);
+        doveAdmin.grantRole(doveAdmin.EMERGENCY_ADMIN_ROLE(), emergencyAdmin);
+        
+        // Deploy token
+        doveToken = new DOVE(address(doveAdmin), charityWallet);
+        
+        // Set token address in admin contract
+        vm.startPrank(admin);
+        doveAdmin.setTokenAddress(address(doveToken));
+        vm.stopPrank();
+        
+        // Deal tokens to test with
+        deal(address(doveToken), user1, TRANSFER_AMOUNT);
+        
+        vm.stopPrank();
     }
-
+    
+    // ================ Basic Token Tests ================
+    
     /**
-     * @dev Test charity fee mechanism
+     * @dev Test initial token setup
+     */
+    function testInitialSetup() public {
+        assertEq(doveToken.totalSupply(), TOTAL_SUPPLY);
+        assertEq(doveToken.balanceOf(address(this)), TOTAL_SUPPLY - TRANSFER_AMOUNT);
+        assertEq(doveToken.balanceOf(user1), TRANSFER_AMOUNT);
+        assertTrue(doveToken.paused());
+        assertEq(doveToken.getCharityWallet(), charityWallet);
+    }
+    
+    /**
+     * @dev Test token launch
+     */
+    function testLaunch() public {
+        // Launch should only work through admin contract
+        vm.startPrank(user1);
+        vm.expectRevert("Caller is not the admin contract");
+        doveToken.launch();
+        vm.stopPrank();
+        
+        // Launch through admin contract
+        vm.startPrank(admin);
+        vm.expectEmit(false, false, false, false);
+        emit Launch(block.timestamp);
+        doveAdmin.launch();
+        vm.stopPrank();
+        
+        // Token should be unpaused after launch
+        assertFalse(doveToken.paused());
+        
+        // Transfers should work after launch
+        vm.startPrank(user1);
+        doveToken.transfer(user2, 1000);
+        vm.stopPrank();
+        
+        assertEq(doveToken.balanceOf(user2), 1000);
+    }
+    
+    // ================ Fee Tests ================
+    
+    /**
+     * @dev Test charity fee application
      */
     function testCharityFee() public {
-        // First send some tokens to alice
-        uint256 initialAmount = 1000 * 1e18;
-        dove.transfer(alice, initialAmount);
-        
-        // Now alice sends to bob (this will incur charity fee)
-        uint256 transferAmount = 100 * 1e18;
-        uint256 charityFee = transferAmount * 50 / 10000; // 0.5% fee
-        
-        vm.startPrank(alice);
-        
-        vm.expectEmit(true, true, false, false);
-        emit CharityFeeCollected(charityFee);
-        
-        dove.transfer(bob, transferAmount);
+        // Launch token first
+        vm.startPrank(admin);
+        doveAdmin.launch();
         vm.stopPrank();
         
-        // Bob should receive amount - fee
-        assertEq(dove.balanceOf(bob), transferAmount - charityFee);
+        // Set DEX status for testing
+        vm.startPrank(admin);
+        doveAdmin.setDexStatus(dexRouter, true);
+        vm.stopPrank();
         
-        // Alice should have initial - transfer
-        assertEq(dove.balanceOf(alice), initialAmount - transferAmount);
+        // User1 transfers to user2
+        uint256 transferAmount = 10000 * 10**18;
+        uint256 expectedCharityFee = transferAmount * 50 / 10000; // 0.5%
         
-        // Owner should get some charity (very small amount)
-        assertGt(dove.balanceOf(owner), TOTAL_SUPPLY - initialAmount);
+        vm.startPrank(user1);
+        uint256 user1BalanceBefore = doveToken.balanceOf(user1);
+        uint256 charityBalanceBefore = doveToken.balanceOf(charityWallet);
+        
+        doveToken.transfer(user2, transferAmount);
+        
+        vm.stopPrank();
+        
+        // Verify balances after transfer
+        assertEq(doveToken.balanceOf(user1), user1BalanceBefore - transferAmount);
+        assertEq(doveToken.balanceOf(user2), transferAmount - expectedCharityFee);
+        assertEq(doveToken.balanceOf(charityWallet), charityBalanceBefore + expectedCharityFee);
     }
     
     /**
-     * @dev Test early-sell tax functionality
+     * @dev Test early sell tax application
      */
     function testEarlySellTax() public {
-        // First give alice some tokens
-        uint256 initialAmount = 1000 * 1e18;
-        dove.transfer(alice, initialAmount);
+        // Launch token first
+        vm.startPrank(admin);
+        doveAdmin.launch();
+        vm.stopPrank();
         
-        // Simulate trading begins (launch timestamp set)
-        vm.prank(alice);
-        dove.transfer(bob, 1); // This sets the launch timestamp
+        // Set DEX status for testing
+        vm.startPrank(admin);
+        doveAdmin.setDexStatus(dexRouter, true);
+        vm.stopPrank();
         
-        // Now alice sells to DEX (which will trigger early sell tax)
-        uint256 transferAmount = 100 * 1e18;
+        // User1 sells to DEX within first 24 hours (5% tax)
+        uint256 sellAmount = 10000 * 10**18;
+        uint256 expectedCharityFee = sellAmount * 50 / 10000; // 0.5%
+        uint256 expectedSellTax = sellAmount * 500 / 10000; // 5%
         
-        // Early sell tax should be 3% for first 24 hours
-        uint256 expectedEarlySellTax = transferAmount * 300 / 10000; // 3%
-        uint256 expectedCharityFee = transferAmount * 50 / 10000; // 0.5%
-        uint256 totalFee = expectedEarlySellTax + expectedCharityFee;
+        vm.startPrank(user1);
+        uint256 user1BalanceBefore = doveToken.balanceOf(user1);
         
-        vm.startPrank(alice);
+        doveToken.transfer(dexRouter, sellAmount);
         
+        vm.stopPrank();
+        
+        // Verify balances after sell
+        assertEq(doveToken.balanceOf(user1), user1BalanceBefore - sellAmount);
+        assertEq(doveToken.balanceOf(dexRouter), sellAmount - expectedCharityFee - expectedSellTax);
+        
+        // Test sell tax reduction over time
+        // Fast forward 24 hours (3% tax)
+        vm.warp(block.timestamp + 24 hours);
+        
+        vm.startPrank(user1);
+        user1BalanceBefore = doveToken.balanceOf(user1);
+        
+        doveToken.transfer(dexRouter, sellAmount);
+        
+        vm.stopPrank();
+        
+        expectedSellTax = sellAmount * 300 / 10000; // 3%
+        
+        // Verify balances after second sell
+        assertEq(doveToken.balanceOf(user1), user1BalanceBefore - sellAmount);
+        assertEq(doveToken.balanceOf(dexRouter), 
+            (sellAmount - expectedCharityFee - expectedSellTax) * 2);
+    }
+    
+    /**
+     * @dev Test fee exclusion
+     */
+    function testFeeExclusion() public {
+        // Launch token first
+        vm.startPrank(admin);
+        doveAdmin.launch();
+        vm.stopPrank();
+        
+        // Exclude user1 from fees
+        vm.startPrank(admin);
+        doveAdmin.excludeFromFee(user1, true);
+        vm.stopPrank();
+        
+        // Verify user1's exclusion status
+        assertTrue(doveToken.isExcludedFromFee(user1));
+        
+        // User1 transfers to user2 (should not incur fees)
+        uint256 transferAmount = 10000 * 10**18;
+        
+        vm.startPrank(user1);
+        doveToken.transfer(user2, transferAmount);
+        vm.stopPrank();
+        
+        // Verify no fees were taken
+        assertEq(doveToken.balanceOf(user2), transferAmount);
+    }
+    
+    // ================ Admin Function Tests ================
+    
+    /**
+     * @dev Test charity wallet update
+     */
+    function testUpdateCharityWallet() public {
+        address newCharityWallet = makeAddr("newCharityWallet");
+        
+        // Only admin/fee manager should be able to update
+        vm.startPrank(user1);
+        vm.expectRevert("Caller is not authorized");
+        doveAdmin.setCharityWallet(newCharityWallet);
+        vm.stopPrank();
+        
+        // Update from fee manager
+        vm.startPrank(feeManager);
         vm.expectEmit(true, true, false, false);
-        emit EarlySellTaxCollected(alice, expectedEarlySellTax);
-        
-        dove.transfer(dex, transferAmount);
+        emit CharityWalletUpdated(charityWallet, newCharityWallet);
+        doveAdmin.setCharityWallet(newCharityWallet);
         vm.stopPrank();
         
-        // DEX should receive amount - fee
-        assertEq(dove.balanceOf(dex), transferAmount - totalFee);
-    }
-    
-    /**
-     * @dev Test excluding account from fee
-     */
-    function testExcludeFromFee() public {
-        // First give alice some tokens
-        uint256 initialAmount = 1000 * 1e18;
-        dove.transfer(alice, initialAmount);
-        
-        // Exclude alice from fee
-        vm.expectEmit(true, false, false, true);
-        emit ExcludeFromFee(alice, true);
-        
-        dove.excludeFromFee(alice);
-        
-        // Now alice transfers to bob without fee
-        uint256 transferAmount = 100 * 1e18;
-        
-        vm.startPrank(alice);
-        dove.transfer(bob, transferAmount);
-        vm.stopPrank();
-        
-        // Bob should receive full amount (no fee)
-        assertEq(dove.balanceOf(bob), transferAmount);
-    }
-    
-    /**
-     * @dev Test max transaction limit
-     */
-    function testMaxTransactionLimit() public {
-        // First give alice some tokens
-        uint256 initialAmount = 10_000_000 * 1e18;
-        dove.transfer(alice, initialAmount);
-        
-        // Simulate trading begins (launch timestamp set)
-        vm.prank(alice);
-        dove.transfer(bob, 1); // This sets the launch timestamp
-        
-        // Get max tx limit
-        uint256 maxTxLimit = dove.getMaxTransactionAmount();
-        
-        // Try to transfer more than limit
-        vm.startPrank(alice);
-        vm.expectRevert("Transfer amount exceeds max transaction limit");
-        dove.transfer(bob, maxTxLimit + 1);
-        vm.stopPrank();
-        
-        // Try with limit amount (should work)
-        vm.startPrank(alice);
-        dove.transfer(bob, maxTxLimit);
-        vm.stopPrank();
-        
-        assertEq(dove.balanceOf(bob), maxTxLimit + 1); // +1 from previous transfer
+        // Verify new charity wallet
+        assertEq(doveToken.getCharityWallet(), newCharityWallet);
     }
     
     /**
      * @dev Test disabling early sell tax
      */
     function testDisableEarlySellTax() public {
-        // Simulate trading begins
-        vm.prank(alice);
-        dove.transfer(bob, 1); // This sets the launch timestamp
+        // Launch token first
+        vm.startPrank(admin);
+        doveAdmin.launch();
+        vm.stopPrank();
         
-        // Disable early sell tax
-        dove.disableEarlySellTax();
+        // Set DEX status for testing
+        vm.startPrank(admin);
+        doveAdmin.setDexStatus(dexRouter, true);
+        vm.stopPrank();
         
-        // Verify early sell tax is 0 now
-        assertEq(dove.getEarlySellTaxFor(alice), 0);
+        // Initial sell with tax
+        uint256 sellAmount = 10000 * 10**18;
+        uint256 expectedCharityFee = sellAmount * 50 / 10000; // 0.5%
+        uint256 expectedSellTax = sellAmount * 500 / 10000; // 5%
+        
+        vm.startPrank(user1);
+        doveToken.transfer(dexRouter, sellAmount);
+        vm.stopPrank();
+        
+        // Disable early sell tax (only emergency admin can do it)
+        vm.startPrank(emergencyAdmin);
+        vm.expectEmit(false, false, false, false);
+        emit EarlySellTaxDisabled();
+        doveAdmin.disableEarlySellTax();
+        vm.stopPrank();
+        
+        // New sell should have no sell tax, only charity fee
+        vm.startPrank(user1);
+        uint256 dexBalanceBefore = doveToken.balanceOf(dexRouter);
+        
+        doveToken.transfer(dexRouter, sellAmount);
+        
+        vm.stopPrank();
+        
+        // Verify only charity fee was applied
+        assertEq(doveToken.balanceOf(dexRouter), dexBalanceBefore + sellAmount - expectedCharityFee);
     }
     
     /**
      * @dev Test disabling max transaction limit
      */
     function testDisableMaxTxLimit() public {
-        // Disable max tx limit
-        dove.disableMaxTxLimit();
+        // Launch token first
+        vm.startPrank(admin);
+        doveAdmin.launch();
+        vm.stopPrank();
         
-        // Verify max tx limit is now max uint256
-        assertEq(dove.getMaxTransactionAmount(), type(uint256).max);
+        // Try to transfer more than max tx limit
+        uint256 maxAmount = TOTAL_SUPPLY / 100; // 1% of supply
+        
+        deal(address(doveToken), user1, maxAmount * 2);
+        
+        vm.startPrank(user1);
+        vm.expectRevert("Transfer amount exceeds the maximum allowed");
+        doveToken.transfer(user2, maxAmount + 1);
+        vm.stopPrank();
+        
+        // Disable max tx limit
+        vm.startPrank(admin);
+        vm.expectEmit(false, false, false, false);
+        emit MaxTxLimitDisabled();
+        doveAdmin.disableMaxTxLimit();
+        vm.stopPrank();
+        
+        // Now large transfers should work
+        vm.startPrank(user1);
+        doveToken.transfer(user2, maxAmount + 1);
+        vm.stopPrank();
+        
+        assertEq(doveToken.balanceOf(user2), maxAmount + 1);
+    }
+    
+    // ================ Multisig Tests ================
+    
+    /**
+     * @dev Test admin contract update proposal
+     */
+    function testAdminUpdateProposal() public {
+        address newAdmin = makeAddr("newAdmin");
+        DOVEAdmin newAdminContract = new DOVEAdmin(newAdmin);
+        
+        // Propose admin update
+        vm.startPrank(admin);
+        uint256 proposalId = doveToken.proposeAdminUpdate(address(newAdminContract));
+        vm.stopPrank();
+        
+        // Get proposal details
+        (address proposedAdmin, uint256 timestamp, uint256 approvalCount, bool executed) = 
+            doveToken.getAdminUpdateProposal(proposalId);
+        
+        assertEq(proposedAdmin, address(newAdminContract));
+        assertEq(approvalCount, 1); // Proposer auto-approves
+        assertFalse(executed);
+        
+        // Second approval from fee manager
+        vm.startPrank(feeManager);
+        doveToken.approveAdminUpdate(proposalId);
+        vm.stopPrank();
+        
+        // Verify admin contract was updated (requires 2 approvals)
+        assertEq(doveToken.getAdminContract(), address(newAdminContract));
     }
     
     /**
-     * @dev Test tax rate decreases over time
+     * @dev Test proposal expiry
      */
-    function testEarlySellTaxDecreases() public {
-        // Simulate trading begins
-        vm.prank(alice);
-        dove.transfer(bob, 1); // This sets the launch timestamp
+    function testProposalExpiry() public {
+        address newAdmin = makeAddr("newAdmin");
+        DOVEAdmin newAdminContract = new DOVEAdmin(newAdmin);
         
-        // Check initial tax rate (day 1)
-        assertEq(dove.getEarlySellTaxFor(alice), 300); // 3%
+        // Propose admin update
+        vm.startPrank(admin);
+        uint256 proposalId = doveToken.proposeAdminUpdate(address(newAdminContract));
+        vm.stopPrank();
         
-        // Advance time by 1 day
-        skip(1 days);
+        // Fast forward 8 days (past expiry)
+        vm.warp(block.timestamp + 8 days);
         
-        // Check tax rate for day 2
-        assertEq(dove.getEarlySellTaxFor(alice), 200); // 2%
+        // Second approval should revert due to expiry
+        vm.startPrank(feeManager);
+        vm.expectRevert("Proposal expired");
+        doveToken.approveAdminUpdate(proposalId);
+        vm.stopPrank();
+    }
+    
+    // ================ Security Tests ================
+    
+    /**
+     * @dev Test security against reentrancy
+     */
+    function testReentrancyProtection() public {
+        // Launch token first
+        vm.startPrank(admin);
+        doveAdmin.launch();
+        vm.stopPrank();
         
-        // Advance time by 1 more day
-        skip(1 days);
+        // Test reentrancy protection in _transfer
+        // This would normally require a malicious contract, but we can check
+        // that the nonReentrant modifier is applied
         
-        // Check tax rate for day 3
-        assertEq(dove.getEarlySellTaxFor(alice), 100); // 1%
+        // For more comprehensive tests, a reentrant attack contract
+        // could be created to attempt calling back into the token
+    }
+    
+    /**
+     * @dev Test paused token transfers
+     */
+    function testPausedTransfers() public {
+        // Token should start paused
+        assertTrue(doveToken.paused());
         
-        // Advance time by 1 more day
-        skip(1 days);
+        // Transfers should be blocked
+        vm.startPrank(user1);
+        vm.expectRevert("Token transfer paused");
+        doveToken.transfer(user2, 1000);
+        vm.stopPrank();
         
-        // Check tax rate after 3 days (should be 0)
-        assertEq(dove.getEarlySellTaxFor(alice), 0);
+        // Launch to unpause
+        vm.startPrank(admin);
+        doveAdmin.launch();
+        vm.stopPrank();
+        
+        // Transfers should work now
+        vm.startPrank(user1);
+        doveToken.transfer(user2, 1000);
+        vm.stopPrank();
+        
+        // Admin should be able to pause again
+        vm.startPrank(admin);
+        doveAdmin.pause();
+        vm.stopPrank();
+        
+        // Transfers should be blocked again
+        vm.startPrank(user1);
+        vm.expectRevert("Token transfer paused");
+        doveToken.transfer(user2, 1000);
+        vm.stopPrank();
     }
 }

@@ -21,6 +21,7 @@ contract DOVEMultisig is ReentrancyGuard, AccessControl {
     // Multisig configuration
     uint256 private _requiredApprovals;
     uint256 private _operationNonce;
+    mapping(bytes32 => uint256) private _roleCount;
     
     // Operation tracking
     struct Operation {
@@ -32,7 +33,6 @@ contract DOVEMultisig is ReentrancyGuard, AccessControl {
         uint256 creationTime;
     }
     
-    // Operation storage
     mapping(bytes32 => Operation) private _operations;
     mapping(bytes32 => mapping(address => bool)) private _operationApprovals;
     
@@ -77,7 +77,7 @@ contract DOVEMultisig is ReentrancyGuard, AccessControl {
             _grantRole(APPROVER_ROLE, initialApprovers[i]);
         }
         
-        // Set required approvals
+        _roleCount[APPROVER_ROLE] = initialApprovers.length;
         _requiredApprovals = requiredSignatures;
     }
     
@@ -200,7 +200,7 @@ contract DOVEMultisig is ReentrancyGuard, AccessControl {
     function setRequiredApprovals(uint256 newRequiredApprovals) external nonReentrant onlyRole(MULTISIG_ADMIN_ROLE) {
         require(newRequiredApprovals > 0, "Required approvals must be > 0");
         require(
-            newRequiredApprovals <= getRoleMemberCount(APPROVER_ROLE),
+            newRequiredApprovals <= _roleCount[APPROVER_ROLE],
             "Required approvals cannot exceed approver count"
         );
         
@@ -219,6 +219,7 @@ contract DOVEMultisig is ReentrancyGuard, AccessControl {
         require(!hasRole(APPROVER_ROLE, approver), "Already an approver");
         
         _grantRole(APPROVER_ROLE, approver);
+        _roleCount[APPROVER_ROLE]++;
     }
     
     /**
@@ -228,11 +229,12 @@ contract DOVEMultisig is ReentrancyGuard, AccessControl {
     function removeApprover(address approver) external nonReentrant onlyRole(MULTISIG_ADMIN_ROLE) {
         require(hasRole(APPROVER_ROLE, approver), "Not an approver");
         require(
-            getRoleMemberCount(APPROVER_ROLE) > _requiredApprovals,
+            _roleCount[APPROVER_ROLE] > _requiredApprovals,
             "Cannot reduce approvers below required approvals"
         );
         
         _revokeRole(APPROVER_ROLE, approver);
+        _roleCount[APPROVER_ROLE]--;
     }
     
     // ================ View Functions ================
@@ -286,6 +288,39 @@ contract DOVEMultisig is ReentrancyGuard, AccessControl {
      * @return Number of approvers
      */
     function getApproverCount() external view returns (uint256) {
-        return getRoleMemberCount(APPROVER_ROLE);
+        return _roleCount[APPROVER_ROLE];
+    }
+    
+    /**
+     * @dev Custom implementation to track role member count
+     * @param role Role to check
+     * @return Number of members with the role
+     */
+    function getRoleMemberCount(bytes32 role) public view returns (uint256) {
+        return _roleCount[role];
+    }
+    
+    /**
+     * @dev Override the grantRole function to update the role count
+     * @param role Role to grant
+     * @param account Account to grant the role to
+     */
+    function grantRole(bytes32 role, address account) public override onlyRole(getRoleAdmin(role)) {
+        if (!hasRole(role, account)) {
+            _roleCount[role]++;
+        }
+        _grantRole(role, account);
+    }
+    
+    /**
+     * @dev Override the revokeRole function to update the role count
+     * @param role Role to revoke
+     * @param account Account to revoke the role from
+     */
+    function revokeRole(bytes32 role, address account) public override onlyRole(getRoleAdmin(role)) {
+        if (hasRole(role, account)) {
+            _roleCount[role]--;
+        }
+        _revokeRole(role, account);
     }
 }

@@ -29,7 +29,7 @@ contract DOVEFees is ReentrancyGuard {
     mapping(address => bool) private _isExcludedFromFee;
     
     // DEX addresses for sell tax calculation
-    mapping(address => bool) private _isDex;
+    mapping(address => bool) private dexAddresses;
     
     // Launch tracking
     uint256 private _launchTimestamp;
@@ -99,7 +99,7 @@ contract DOVEFees is ReentrancyGuard {
         }
         
         // Apply early sell tax only for DEX sells
-        if (_isEarlySellTaxEnabled && _isDex[recipient]) {
+        if (_isEarlySellTaxEnabled && dexAddresses[recipient]) {
             uint256 timeSinceLaunch = block.timestamp - _launchTimestamp;
             uint256 sellTaxAmount = FeeLibrary.calculateEarlySellTax(netAmount, timeSinceLaunch);
             
@@ -150,17 +150,17 @@ contract DOVEFees is ReentrancyGuard {
     }
     
     /**
-     * @dev Set a DEX address status
-     * @param dexAddress Address to set status for
-     * @param isDex Whether the address is a DEX
+     * @dev Sets the DEX status of an address.
+     * @param dexAddress Address to set DEX status for
+     * @param _isDex Boolean indicating if the address is a DEX
      */
-    function setDexStatus(address dexAddress, bool isDex) external onlyDOVE nonReentrant {
+    function setDexStatus(address dexAddress, bool _isDex) external onlyDOVE nonReentrant {
         require(dexAddress != address(0), "DEX address cannot be zero address");
         
-        _isDex[dexAddress] = isDex;
+        dexAddresses[dexAddress] = _isDex;
         
         // Emit event from DOVE token
-        IDOVE(_doveToken).emitDexStatusUpdated(dexAddress, isDex);
+        IDOVE(_doveToken).emitDexStatusUpdated(dexAddress, _isDex);
     }
     
     /**
@@ -207,8 +207,8 @@ contract DOVEFees is ReentrancyGuard {
      * @param account Address to check
      * @return Whether the address is a DEX
      */
-    function isDex(address account) external view returns (bool) {
-        return _isDex[account];
+    function getDexStatus(address account) external view returns (bool) {
+        return dexAddresses[account];
     }
     
     /**
