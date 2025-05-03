@@ -13,13 +13,15 @@ interface IDOVEAdmin is IAccessControl {
     /**
      * @dev Set the DOVE token address
      * @param tokenAddress Address of the DOVE token
+     * @return bool Success indicator
      */
-    function setTokenAddress(address tokenAddress) external;
+    function setTokenAddress(address tokenAddress) external returns (bool);
     
     /**
      * @dev Launch the DOVE token
+     * @return True if launch is successful
      */
-    function launch() external;
+    function launch() external returns (bool);
     
     /**
      * @dev Pause the DOVE token
@@ -50,6 +52,19 @@ interface IDOVEAdmin is IAccessControl {
      * @dev Disable the early sell tax
      */
     function disableEarlySellTax() external;
+    
+    /**
+     * @dev Initialize token secondary contracts
+     * @param eventsContract Address of events contract
+     * @param governanceContract Address of governance contract
+     * @param infoContract Address of info contract
+     * @return True if initialization was successful
+     */
+    function initialiseTokenContracts(
+        address eventsContract,
+        address governanceContract,
+        address infoContract
+    ) external returns (bool);
     
     /**
      * @dev Disable the max transaction limit
@@ -100,6 +115,11 @@ interface IDOVEAdmin is IAccessControl {
      * @dev Emitted when the max transaction limit is disabled
      */
     event MaxTxLimitDisabled();
+    
+    /**
+     * @dev Emitted when the max wallet limit is disabled
+     */
+    event MaxWalletLimitDisabled();
     
     /**
      * @dev Emitted when the token is launched

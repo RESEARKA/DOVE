@@ -15,6 +15,12 @@ interface IDOVEInfo {
      */
     function setMaxTxLimitEnabled(bool isEnabled) external;
     
+    /**
+     * @dev Update max wallet limit status
+     * @param isEnabled Whether the limit is enabled
+     */
+    function setMaxWalletLimitEnabled(bool isEnabled) external;
+    
     // ================ View Functions ================
     
     /**

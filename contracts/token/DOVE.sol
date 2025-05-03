@@ -62,6 +62,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     // Max transaction limit enabled flag
     bool private _isMaxTxLimitEnabled = true;
     
+    // Max wallet limit enabled flag
+    bool private _isMaxWalletLimitEnabled = true;
+    
     // Whether all secondary contracts are set
     bool private _fullyInitialized;
     
@@ -71,10 +74,12 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @dev Constructor - initializes the token with base dependencies
      * @param adminContract Address of the admin contract
      * @param charityWallet Initial charity wallet address
+     * @param initialSupplyRecipient Address to receive the initial token supply
      */
-    constructor(address adminContract, address charityWallet) ERC20("DOVE", "DOVE") {
+    constructor(address adminContract, address charityWallet, address initialSupplyRecipient) ERC20("DOVE", "DOVE") {
         require(adminContract != address(0), "Admin contract cannot be zero address");
         require(charityWallet != address(0), "Charity wallet cannot be zero address");
+        require(initialSupplyRecipient != address(0), "Supply recipient cannot be zero address");
         
         // Set admin contract
         _adminContract = IDOVEAdmin(adminContract);
@@ -85,11 +90,14 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         // Create and set up fee manager
         _feeManager = new DOVEFees(address(this), charityWallet);
         
-        // Mint total supply to deployer (this contract)
-        _mint(msg.sender, TOTAL_SUPPLY);
+        // Mint total supply to the specified recipient (not always deployer)
+        _mint(initialSupplyRecipient, TOTAL_SUPPLY);
         
-        // Pause transfers until launch
-        _pause();
+        // Record launch instead of pausing
+        _feeManager.recordLaunch();
+        
+        // Self-register with admin contract
+        IDOVEAdmin(adminContract).setTokenAddress(address(this));
     }
     
     // ================ Initialization Functions ================
@@ -228,6 +236,16 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         _isMaxTxLimitEnabled = false;
         _infoContract.setMaxTxLimitEnabled(false);
         _eventsContract.emitMaxTxLimitDisabled();
+    }
+    
+    /**
+     * @dev Disable max wallet limit permanently
+     */
+    function disableMaxWalletLimit() external override onlyAdmin whenInitialized {
+        require(_isMaxWalletLimitEnabled, "Max wallet limit already disabled");
+        _isMaxWalletLimitEnabled = false;
+        _infoContract.setMaxWalletLimitEnabled(false);
+        emit MaxWalletLimitDisabled();
     }
     
     /**
@@ -405,7 +423,7 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         address sender,
         address recipient,
         uint256 amount
-    ) internal override whenNotPaused nonReentrant {
+    ) internal override whenNotPaused {
         require(sender != address(0), "Transfer from the zero address");
         require(recipient != address(0), "Transfer to the zero address");
         
@@ -419,5 +437,44 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         
         // Transfer the net amount
         super._transfer(sender, recipient, netAmount);
+    }
+    
+    /**
+     * @dev Override ERC20 transfer function to add reentrancy protection
+     * @param to Address to transfer to
+     * @param amount Amount to transfer
+     * @return Success indicator
+     */
+    function transfer(address to, uint256 amount) public override nonReentrant returns (bool) {
+        return super.transfer(to, amount);
+    }
+    
+    /**
+     * @dev Override ERC20 transferFrom function to add reentrancy protection
+     * @param from Address to transfer from
+     * @param to Address to transfer to 
+     * @param amount Amount to transfer
+     * @return Success indicator
+     */
+    function transferFrom(address from, address to, uint256 amount) public override nonReentrant returns (bool) {
+        return super.transferFrom(from, to, amount);
+    }
+    
+    /**
+     * @dev Returns whether the token is paused
+     * @return Whether the token is paused
+     */
+    function paused() public view override(Pausable, IDOVE) returns (bool) {
+        return super.paused();
+    }
+    
+    /**
+     * @dev ERC20 _beforeTokenTransfer override
+     * @param from Address to deduct from
+     * @param to Recipient address
+     * @param amount Amount to transfer
+     */
+    function _beforeTokenTransfer(address from, address to, uint256 amount) internal override whenNotPaused {
+        super._beforeTokenTransfer(from, to, amount);
     }
 }

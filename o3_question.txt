@@ -1,1 +1,0 @@
-Security Analysis Question: Our DOVE token project has a guideline to keep files under 300 lines of code, but DOVEMultisig.sol is currently 326 lines. From a security and code quality perspective, does having this contract slightly exceed the line limit introduce any significant risks? Should we prioritize further refactoring, or is this acceptable?

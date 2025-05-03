@@ -5,6 +5,7 @@ import "../token/DOVE.sol";
 import "../token/DOVEEvents.sol";
 import "../token/DOVEInfo.sol";
 import "../admin/DOVEGovernance.sol";
+import "../interfaces/IDOVEAdmin.sol";
 
 /**
  * @title DOVEDeployer
@@ -51,7 +52,7 @@ contract DOVEDeployer {
         DOVEGovernance governanceContract = new DOVEGovernance();
         
         // Step 2: Deploy main DOVE token with minimal dependencies
-        DOVE doveToken = new DOVE(adminContract, charityWallet);
+        DOVE doveToken = new DOVE(adminContract, charityWallet, msg.sender);
         
         // Step 3: Get fee manager address from DOVE token
         address feeManager = doveToken.getFeeManager();
@@ -74,13 +75,29 @@ contract DOVEDeployer {
         );
         require(infoInitialized, "Info initialization failed");
         
-        // Step 6: Finally, set all secondary contracts on the DOVE token
-        bool doveInitialized = doveToken.setSecondaryContracts(
+        // Set all secondary contracts on the DOVE token via the admin contract
+        bool doveInitialized = IDOVEAdmin(adminContract).initialiseTokenContracts(
             address(eventsContract),
             address(governanceContract),
             address(infoContract)
         );
         require(doveInitialized, "DOVE initialization failed");
+        
+        // Grant deployer necessary roles
+        IDOVEAdmin(adminContract).grantRole(
+            IDOVEAdmin(adminContract).DEFAULT_ADMIN_ROLE(),
+            msg.sender
+        );
+        
+        IDOVEAdmin(adminContract).grantRole(
+            IDOVEAdmin(adminContract).FEE_MANAGER_ROLE(),
+            msg.sender
+        );
+        
+        IDOVEAdmin(adminContract).grantRole(
+            IDOVEAdmin(adminContract).EMERGENCY_ADMIN_ROLE(),
+            msg.sender
+        );
         
         // Emit deployment event
         emit DOVEEcosystemDeployed(

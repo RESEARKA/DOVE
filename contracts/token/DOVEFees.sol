@@ -73,7 +73,7 @@ contract DOVEFees is ReentrancyGuard {
         address sender,
         address recipient,
         uint256 amount
-    ) external onlyDOVE nonReentrant returns (uint256 netAmount) {
+    ) external onlyDOVE returns (uint256 netAmount) {
         // Skip fees for excluded addresses or if token not launched
         if (!_isLaunched || _isExcludedFromFee[sender]) {
             return amount;
@@ -125,7 +125,7 @@ contract DOVEFees is ReentrancyGuard {
      * @dev Set charity wallet address
      * @param newCharityWallet New charity wallet address
      */
-    function setCharityWallet(address newCharityWallet) external onlyDOVE nonReentrant {
+    function setCharityWallet(address newCharityWallet) external onlyDOVE {
         require(newCharityWallet != address(0), "New charity wallet cannot be zero address");
         
         address oldWallet = _charityWallet;
@@ -140,7 +140,7 @@ contract DOVEFees is ReentrancyGuard {
      * @param account Address to update
      * @param excluded Whether to exclude from fees
      */
-    function setExcludedFromFee(address account, bool excluded) external onlyDOVE nonReentrant {
+    function setExcludedFromFee(address account, bool excluded) external onlyDOVE {
         require(account != address(0), "Account cannot be zero address");
         
         _isExcludedFromFee[account] = excluded;
@@ -154,7 +154,7 @@ contract DOVEFees is ReentrancyGuard {
      * @param dexAddress Address to set DEX status for
      * @param _isDex Boolean indicating if the address is a DEX
      */
-    function setDexStatus(address dexAddress, bool _isDex) external onlyDOVE nonReentrant {
+    function setDexStatus(address dexAddress, bool _isDex) external onlyDOVE {
         require(dexAddress != address(0), "DEX address cannot be zero address");
         
         dexAddresses[dexAddress] = _isDex;
@@ -166,7 +166,7 @@ contract DOVEFees is ReentrancyGuard {
     /**
      * @dev Disable early sell tax permanently
      */
-    function disableEarlySellTax() external onlyDOVE nonReentrant {
+    function disableEarlySellTax() external onlyDOVE {
         require(_isEarlySellTaxEnabled, "Early sell tax already disabled");
         _isEarlySellTaxEnabled = false;
         
@@ -177,7 +177,7 @@ contract DOVEFees is ReentrancyGuard {
     /**
      * @dev Record token launch
      */
-    function recordLaunch() external onlyDOVE nonReentrant {
+    function recordLaunch() external onlyDOVE {
         require(!_isLaunched, "Token already launched");
         _isLaunched = true;
         _launchTimestamp = block.timestamp;

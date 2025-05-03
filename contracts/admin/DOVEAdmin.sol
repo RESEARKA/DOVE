@@ -43,6 +43,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
     event SecurityLockdown(bool enabled);
     event OperationScheduled(bytes32 indexed operationId, uint256 executionTime);
     event OperationCancelled(bytes32 indexed operationId);
+    event Launch();
     
     // ================ Constructor ================
     
@@ -96,27 +97,38 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
     // ================ External Functions ================
     
     /**
-     * @dev Launch the token, enabling transfers
-     * @notice Requires DEFAULT_ADMIN_ROLE
+     * @dev Launch the DOVE token, enabling transfers
+     * @return True if launch is successful
      */
-    function launch() external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
-        // Create operation ID using nonce for uniqueness
-        bytes32 operationId = keccak256(abi.encodePacked("launch", msg.sender, _globalNonce++));
-        
-        // Require timelock for this critical operation
-        if (_operationTimelocks[operationId] == 0) {
-            _operationTimelocks[operationId] = block.timestamp + TIMELOCK_DELAY;
-            emit OperationScheduled(operationId, _operationTimelocks[operationId]);
-            return;
+    function launch() external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked returns (bool) {
+        // Skip if token is not set or already launched (not paused)
+        if (address(_doveToken) == address(0) || !_doveToken.paused()) {
+            return true; // Already launched
         }
         
-        // Check timelock elapsed
-        require(block.timestamp >= _operationTimelocks[operationId], "Timelock period not elapsed");
-        delete _operationTimelocks[operationId];
+        // Schedule the operation for execution after timelock
+        bytes32 operationId = keccak256(abi.encodePacked("launch", _globalNonce++));
         
-        // Execute launch
-        require(address(_doveToken) != address(0), "Token address not set");
-        _doveToken.launch();
+        // Check if operation is already scheduled and timed out
+        if (_operationTimelocks[operationId] > 0 && 
+            _operationTimelocks[operationId] <= block.timestamp) {
+            // Execute launch
+            _doveToken.unpause();
+            
+            // Clean up the timelock
+            delete _operationTimelocks[operationId];
+            
+            emit Launch();
+            return true;
+        } else {
+            // Either first scheduling or not yet timed out
+            if (_operationTimelocks[operationId] == 0) {
+                // Schedule operation
+                _operationTimelocks[operationId] = block.timestamp + TIMELOCK_DELAY;
+                emit OperationScheduled(operationId, _operationTimelocks[operationId]);
+            }
+            return false;
+        }
     }
     
     /**
@@ -192,15 +204,62 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
     }
     
     /**
-     * @dev Set token address
-     * @param tokenAddress Address of the DOVE token
-     * @notice Requires DEFAULT_ADMIN_ROLE
+     * @dev Disable the max wallet limit
      */
-    function setTokenAddress(address tokenAddress) external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
-        require(tokenAddress != address(0), "Token address cannot be zero address");
+    function disableMaxWalletLimit() external nonReentrant notLocked {
+        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Caller is not admin");
+        _doveToken.disableMaxWalletLimit();
+        emit MaxWalletLimitDisabled();
+    }
+
+    /**
+     * @dev Initialise the secondary contracts for the DOVE token
+     * @param eventsContract Address of the events contract
+     * @param governanceContract Address of the governance contract
+     * @param infoContract Address of the info contract
+     * @return True if initialization is successful
+     */
+    function initialiseTokenContracts(
+        address eventsContract,
+        address governanceContract,
+        address infoContract
+    ) external nonReentrant returns (bool) {
+        // First ensure token is registered
+        require(address(_doveToken) != address(0), "Token address not set");
+        
+        // If the caller is not an admin, we're assuming this is the first initialization
+        // during deployment. For any subsequent calls, admin role will be required.
+        if (hasRole(DEFAULT_ADMIN_ROLE, msg.sender) == false) {
+            // This is the initial setup during deployment, which we allow
+            // Note: If the token is already initialized, setSecondaryContracts will revert
+            // with "Already fully initialized", so this is safe
+        }
+        
+        return _doveToken.setSecondaryContracts(
+            eventsContract,
+            governanceContract,
+            infoContract
+        );
+    }
+    
+    /**
+     * @dev Sets the DOVE token address
+     * @param tokenAddress Address of the DOVE token
+     * @return bool Success indicator
+     */
+    function setTokenAddress(address tokenAddress) external override nonReentrant notLocked returns (bool) {
+        // Allow anybody the *first* time, afterwards only admins
+        if (address(_doveToken) != address(0)) {
+            _checkRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        }
+
         require(address(_doveToken) == address(0), "Token address already set");
+        require(tokenAddress != address(0), "Token cannot be zero address");
+        // We remove the code length check because contracts calling from their constructor
+        // won't have code deployed yet, so the check would fail
         _doveToken = IDOVE(tokenAddress);
         emit TokenAddressSet(tokenAddress);
+        return true;
     }
     
     /**

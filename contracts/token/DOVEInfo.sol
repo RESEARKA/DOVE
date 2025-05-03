@@ -33,6 +33,9 @@ contract DOVEInfo is IDOVEInfo {
     // Max transaction limit enabled flag
     bool private _isMaxTxLimitEnabled = true;
     
+    // Max wallet limit enabled flag
+    bool private _isMaxWalletLimitEnabled = true;
+    
     // Initialization flag
     bool private _initialized;
     
@@ -91,6 +94,14 @@ contract DOVEInfo is IDOVEInfo {
      */
     function setMaxTxLimitEnabled(bool isEnabled) external override onlyDOVE {
         _isMaxTxLimitEnabled = isEnabled;
+    }
+    
+    /**
+     * @dev Update max wallet limit status
+     * @param isEnabled Whether the limit is enabled
+     */
+    function setMaxWalletLimitEnabled(bool isEnabled) external override onlyDOVE {
+        _isMaxWalletLimitEnabled = isEnabled;
     }
     
     // ================ View Functions ================
