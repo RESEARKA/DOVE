@@ -1,76 +1,128 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
 /**
  * @title DOVE Token Interface
- * @dev Interface for the DOVE token with charity fee and early sell tax mechanics
+ * @dev Interface for the DOVE token contract
  */
-interface IDOVE is IERC20 {
+interface IDOVE {
+    // ================ Events ================
+    
+    event Launch(uint256 timestamp);
+    event CharityWalletUpdated(address indexed oldWallet, address indexed newWallet);
+    event ExcludedFromFeeUpdated(address indexed account, bool excluded);
+    event DexStatusUpdated(address indexed dexAddress, bool isDex);
+    event EarlySellTaxDisabled();
+    event MaxTxLimitDisabled();
+    
+    // ================ State-Changing Functions ================
+    
     /**
-     * @dev Returns the charity fee percentage (in basis points)
-     * @return Fee percentage (e.g., 50 = 0.5%)
+     * @dev Launch the token, enabling transfers
+     */
+    function launch() external;
+    
+    /**
+     * @dev Pause all token transfers
+     */
+    function pause() external;
+    
+    /**
+     * @dev Unpause all token transfers
+     */
+    function unpause() external;
+    
+    /**
+     * @dev Set charity wallet address
+     * @param newCharityWallet New charity wallet address
+     */
+    function setCharityWallet(address newCharityWallet) external;
+    
+    /**
+     * @dev Set an address as excluded or included from fees
+     * @param account Address to update
+     * @param excluded Whether to exclude from fees
+     */
+    function setExcludedFromFee(address account, bool excluded) external;
+    
+    /**
+     * @dev Set a DEX address status
+     * @param dexAddress Address to set status for
+     * @param isDex Whether the address is a DEX
+     */
+    function setDexStatus(address dexAddress, bool isDex) external;
+    
+    /**
+     * @dev Disable early sell tax permanently
+     */
+    function disableEarlySellTax() external;
+    
+    /**
+     * @dev Disable max transaction limit permanently
+     */
+    function disableMaxTxLimit() external;
+
+    /**
+     * @dev Transfer fee from contract to recipient
+     * @param from Address to deduct from
+     * @param to Recipient address
+     * @param amount Amount to transfer
+     * @return Whether the transfer was successful
+     */
+    function transferFeeFromContract(address from, address to, uint256 amount) external returns (bool);
+    
+    /**
+     * @dev Burn fee amount
+     * @param from Address to deduct from
+     * @param amount Amount to burn
+     * @return Whether the burn was successful
+     */
+    function burnFeeFromContract(address from, uint256 amount) external returns (bool);
+    
+    /**
+     * @dev Emit charity wallet updated event
+     * @param oldWallet Old charity wallet address
+     * @param newWallet New charity wallet address
+     */
+    function emitCharityWalletUpdated(address oldWallet, address newWallet) external;
+    
+    /**
+     * @dev Emit excluded from fee updated event
+     * @param account Address that was updated
+     * @param excluded Whether the address is excluded
+     */
+    function emitExcludedFromFeeUpdated(address account, bool excluded) external;
+    
+    /**
+     * @dev Emit DEX status updated event
+     * @param dexAddress Address that was updated
+     * @param isDex Whether the address is a DEX
+     */
+    function emitDexStatusUpdated(address dexAddress, bool isDex) external;
+    
+    /**
+     * @dev Emit early sell tax disabled event
+     */
+    function emitEarlySellTaxDisabled() external;
+    
+    // ================ View Functions ================
+    
+    /**
+     * @dev Get charity fee percentage
+     * @return The charity fee percentage (in basis points)
      */
     function getCharityFee() external view returns (uint16);
     
     /**
-     * @dev Returns the current charity wallet address
-     * @return Address of the charity wallet
+     * @dev Get charity wallet address
+     * @return The charity wallet address
      */
     function getCharityWallet() external view returns (address);
     
     /**
-     * @dev Returns the timestamp when the token was launched
-     * @return Timestamp of launch
-     */
-    function getLaunchTimestamp() external view returns (uint256);
-    
-    /**
-     * @dev Returns the total amount of charity donations made
-     * @return Total amount in token units
-     */
-    function getTotalCharityDonations() external view returns (uint256);
-    
-    /**
-     * @dev Checks if an address is excluded from fees
+     * @dev Check if an address is excluded from fees
      * @param account Address to check
-     * @return True if excluded from fees
+     * @return Whether the address is excluded from fees
      */
     function isExcludedFromFee(address account) external view returns (bool);
-    
-    /**
-     * @dev Returns the early sell tax rate for an address
-     * @param seller Address to check
-     * @return Early sell tax rate (in basis points)
-     */
-    function getEarlySellTaxFor(address seller) external view returns (uint16);
-    
-    /**
-     * @dev Checks if early sell tax is enabled
-     * @return True if early sell tax is enabled
-     */
-    function isEarlySellTaxEnabled() external view returns (bool);
-    
-    /**
-     * @dev Checks if token has been launched
-     * @return True if token is launched
-     */
-    function isLaunched() external view returns (bool);
-    
-    /**
-     * @dev Returns the maximum allowed transaction amount
-     * @return Maximum transaction amount
-     */
-    function getMaxTransactionAmount() external view returns (uint256);
-    
-    /**
-     * @dev Events emitted by the DOVE token
-     */
-    event CharityDonation(address indexed from, uint256 amount);
-    event EarlySellTaxBurned(address indexed seller, uint256 amount);
-    event TokenLaunched(uint256 timestamp);
-    event CharityWalletUpdated(address oldWallet, address newWallet);
-    event EarlySellTaxDisabled();
-    event MaxTransactionLimitDisabled();
 }
