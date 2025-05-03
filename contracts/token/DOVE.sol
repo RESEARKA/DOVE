@@ -39,7 +39,7 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     // ================ State Variables ================
     
     // Admin contract reference - handles administrative functions
-    IDOVEAdmin private immutable _adminContract;
+    IDOVEAdmin private _adminContract;
     
     // Fee manager - handles all fee calculations and processing
     DOVEFees private immutable _feeManager;
@@ -49,6 +49,26 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     
     // Dead address for token burning
     address private constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+    
+    // Admin update proposals (multisig)
+    struct AdminUpdateProposal {
+        address newAdmin;
+        uint256 timestamp;
+        uint256 approvalCount;
+        mapping(address => bool) hasApproved;
+        bool executed;
+    }
+    
+    // Admin update proposal data
+    uint256 private _currentProposalId;
+    mapping(uint256 => AdminUpdateProposal) private _adminUpdateProposals;
+    uint256 private constant PROPOSAL_EXPIRY = 7 days;
+    uint256 private constant REQUIRED_APPROVALS = 2;
+    
+    // Events for admin updates
+    event AdminUpdateProposed(uint256 indexed proposalId, address indexed proposer, address indexed newAdmin);
+    event AdminUpdateApproved(uint256 indexed proposalId, address indexed approver);
+    event AdminUpdateExecuted(uint256 indexed proposalId, address oldAdmin, address newAdmin);
     
     // ================ Constructor ================
     
@@ -208,6 +228,76 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         return true;
     }
     
+    /**
+     * @dev Propose new admin contract address (multisig operation)
+     * @param newAdminContract Address of the new admin contract
+     * @return proposalId ID of the created proposal
+     */
+    function proposeAdminUpdate(address newAdminContract) external onlyAdmin returns (uint256 proposalId) {
+        require(newAdminContract != address(0), "New admin cannot be zero address");
+        require(newAdminContract != address(_adminContract), "New admin same as current");
+        
+        // Create new proposal ID
+        proposalId = _currentProposalId++;
+        
+        // Initialize proposal
+        AdminUpdateProposal storage proposal = _adminUpdateProposals[proposalId];
+        proposal.newAdmin = newAdminContract;
+        proposal.timestamp = block.timestamp;
+        proposal.approvalCount = 1; // Proposer automatically approves
+        proposal.hasApproved[msg.sender] = true;
+        proposal.executed = false;
+        
+        emit AdminUpdateProposed(proposalId, msg.sender, newAdminContract);
+        emit AdminUpdateApproved(proposalId, msg.sender);
+        
+        return proposalId;
+    }
+    
+    /**
+     * @dev Approve admin update proposal
+     * @param proposalId ID of the proposal to approve
+     */
+    function approveAdminUpdate(uint256 proposalId) external onlyAdmin {
+        AdminUpdateProposal storage proposal = _adminUpdateProposals[proposalId];
+        
+        require(proposal.newAdmin != address(0), "Proposal does not exist");
+        require(!proposal.executed, "Proposal already executed");
+        require(!proposal.hasApproved[msg.sender], "Already approved");
+        require(
+            block.timestamp <= proposal.timestamp + PROPOSAL_EXPIRY,
+            "Proposal expired"
+        );
+        
+        // Record approval
+        proposal.hasApproved[msg.sender] = true;
+        proposal.approvalCount++;
+        
+        emit AdminUpdateApproved(proposalId, msg.sender);
+        
+        // Execute if enough approvals
+        if (proposal.approvalCount >= REQUIRED_APPROVALS) {
+            _executeAdminUpdate(proposalId);
+        }
+    }
+    
+    /**
+     * @dev Execute approved admin update
+     * @param proposalId ID of the proposal to execute
+     */
+    function _executeAdminUpdate(uint256 proposalId) private {
+        AdminUpdateProposal storage proposal = _adminUpdateProposals[proposalId];
+        
+        // Mark as executed first to prevent reentrancy
+        proposal.executed = true;
+        
+        // Update admin contract
+        address oldAdmin = address(_adminContract);
+        _adminContract = IDOVEAdmin(proposal.newAdmin);
+        
+        emit AdminUpdateExecuted(proposalId, oldAdmin, proposal.newAdmin);
+    }
+    
     // ================ Event Emission Functions ================
     
     /**
@@ -275,6 +365,37 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         return _feeManager.isExcludedFromFee(account);
     }
     
+    /**
+     * @dev Get current admin contract
+     * @return Address of the current admin contract
+     */
+    function getAdminContract() external view returns (address) {
+        return address(_adminContract);
+    }
+    
+    /**
+     * @dev Get admin update proposal details
+     * @param proposalId ID of the proposal
+     * @return newAdmin Proposed new admin address
+     * @return timestamp When the proposal was created
+     * @return approvalCount Number of approvals received
+     * @return executed Whether the proposal was executed
+     */
+    function getAdminUpdateProposal(uint256 proposalId) external view returns (
+        address newAdmin,
+        uint256 timestamp,
+        uint256 approvalCount,
+        bool executed
+    ) {
+        AdminUpdateProposal storage proposal = _adminUpdateProposals[proposalId];
+        return (
+            proposal.newAdmin,
+            proposal.timestamp,
+            proposal.approvalCount,
+            proposal.executed
+        );
+    }
+    
     // ================ Internal Functions ================
     
     /**
@@ -287,7 +408,7 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         address sender,
         address recipient,
         uint256 amount
-    ) internal override enforceMaxTxLimit(amount) {
+    ) internal override enforceMaxTxLimit(amount) nonReentrant {
         require(sender != address(0), "Transfer from the zero address");
         require(recipient != address(0), "Transfer to the zero address");
         require(amount > 0, "Transfer amount must be greater than zero");
