@@ -59,9 +59,6 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     // Info contract - handles view function delegation
     IDOVEInfo private _infoContract;
     
-    // Max transaction limit enabled flag
-    bool private _isMaxTxLimitEnabled = true;
-    
     // Max wallet limit enabled flag
     bool private _isMaxWalletLimitEnabled = true;
     
@@ -239,9 +236,15 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @notice Can only be called by the admin contract
      */
     function disableMaxTxLimit() external override onlyAdmin whenInitialized {
-        require(_isMaxTxLimitEnabled, "Max transaction limit already disabled");
-        _isMaxTxLimitEnabled = false;
+        // DOVEInfo is the single source of truth, so we only check there
+        // This ensures the same state is used in both checks and enforcements
+        bool isEnabled = _infoContract.getMaxTransactionAmount() != type(uint256).max;
+        require(isEnabled, "Max transaction limit already disabled");
+        
+        // Update DOVEInfo only - remove dependence on local state
         _infoContract.setMaxTxLimitEnabled(false);
+        
+        // Emit event
         _eventsContract.emitMaxTxLimitDisabled();
     }
     
@@ -384,7 +387,7 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      */
     function getMaxTransactionAmount() external view returns (uint256) {
         if (!_fullyInitialized) {
-            return _isMaxTxLimitEnabled ? _maxTransactionAmount : type(uint256).max;
+            return _maxTransactionAmount;
         }
         return _infoContract.getMaxTransactionAmount();
     }
@@ -434,8 +437,10 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         require(sender != address(0), "Transfer from the zero address");
         require(recipient != address(0), "Transfer to the zero address");
         
-        // Check max transaction limit if enabled
-        if (_isMaxTxLimitEnabled && amount > _maxTransactionAmount) {
+        // Get max transaction amount from DOVEInfo instead of using local state
+        // This ensures that when limits are disabled in DOVEInfo, they are immediately reflected here
+        uint256 maxAmount = _infoContract.getMaxTransactionAmount();
+        if (amount > maxAmount) {
             revert("Transfer amount exceeds the maximum allowed");
         }
         
