@@ -91,6 +91,11 @@ const config: HardhatUserConfig = {
     outDir: "typechain-types",
     target: "ethers-v6",
   },
+  
+  // Mocha configuration for tests
+  mocha: {
+    require: ["ts-node/register", "./test/setup.ts"]
+  },
 };
 
 export default config;

@@ -35,6 +35,9 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
     uint256 private constant TIMELOCK_DELAY = 24 hours;
     mapping(bytes32 => uint256) private _operationTimelocks;
     
+    // Constant for launch operation identifier
+    bytes32 private constant LAUNCH_OP = keccak256("dove.admin.launch");
+
     // ================ Events ================
     
     // Events inherited from IDOVEAdmin interface
@@ -44,6 +47,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
     event OperationScheduled(bytes32 indexed operationId, uint256 executionTime);
     event OperationCancelled(bytes32 indexed operationId);
     event Launch();
+    event OperationExecuted(bytes32 indexed operationId);
     
     // ================ Constructor ================
     
@@ -97,7 +101,8 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
     // ================ External Functions ================
     
     /**
-     * @dev Launch the DOVE token, enabling transfers
+     * @dev Launch the DOVE token (enable transfers)
+     * @notice Requires DEFAULT_ADMIN_ROLE
      * @return True if launch is successful
      */
     function launch() external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked returns (bool) {
@@ -106,29 +111,27 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
             return true; // Already launched
         }
         
-        // Schedule the operation for execution after timelock
-        bytes32 operationId = keccak256(abi.encodePacked("launch", _globalNonce++));
-        
-        // Check if operation is already scheduled and timed out
-        if (_operationTimelocks[operationId] > 0 && 
-            _operationTimelocks[operationId] <= block.timestamp) {
-            // Execute launch
-            _doveToken.unpause();
-            
-            // Clean up the timelock
-            delete _operationTimelocks[operationId];
-            
-            emit Launch();
-            return true;
-        } else {
-            // Either first scheduling or not yet timed out
-            if (_operationTimelocks[operationId] == 0) {
-                // Schedule operation
-                _operationTimelocks[operationId] = block.timestamp + TIMELOCK_DELAY;
-                emit OperationScheduled(operationId, _operationTimelocks[operationId]);
-            }
+        // Schedule the operation if not already scheduled
+        if (_operationTimelocks[LAUNCH_OP] == 0) {
+            _operationTimelocks[LAUNCH_OP] = block.timestamp + TIMELOCK_DELAY;
+            emit OperationScheduled(LAUNCH_OP, _operationTimelocks[LAUNCH_OP]);
             return false;
         }
+        
+        // Check if timelock has elapsed
+        require(block.timestamp >= _operationTimelocks[LAUNCH_OP], "Timelock not elapsed");
+        
+        // Execute launch
+        _doveToken.launch();  // Call launch() instead of unpause() to ensure proper launch flow
+        
+        // Clean up the timelock
+        delete _operationTimelocks[LAUNCH_OP];
+        
+        // Emit events
+        emit OperationExecuted(LAUNCH_OP);
+        emit Launch();
+        
+        return true;
     }
     
     /**
@@ -298,6 +301,21 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
         require(_operationTimelocks[operationId] != 0, "Operation not scheduled");
         delete _operationTimelocks[operationId];
         emit OperationCancelled(operationId);
+    }
+    
+    // ================ Test Functions ================
+    
+    /**
+     * @dev Test-only function to bypass timelock - ONLY FOR TESTING
+     * @param operationId The operation ID to set as executable
+     * @notice This function should never be deployed to production
+     */
+    function TEST_setOperationTimelockElapsed(bytes32 operationId) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        // Only set if operation is already scheduled but not elapsed
+        if (_operationTimelocks[operationId] > 0) {
+            // Set to a timestamp in the past
+            _operationTimelocks[operationId] = block.timestamp - 1 hours;
+        }
     }
     
     // ================ View Functions ================

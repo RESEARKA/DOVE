@@ -93,11 +93,11 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         // Mint total supply to the specified recipient (not always deployer)
         _mint(initialSupplyRecipient, TOTAL_SUPPLY);
         
-        // Record launch instead of pausing
-        _feeManager.recordLaunch();
-        
         // Self-register with admin contract
         IDOVEAdmin(adminContract).setTokenAddress(address(this));
+        
+        // Token starts in PAUSED state – must be launched explicitly later
+        _pause();
     }
     
     // ================ Initialization Functions ================
@@ -170,7 +170,14 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      */
     function launch() external override onlyAdmin whenInitialized {
         require(paused(), "Token is already launched");
+        
+        // 1. Remember the launch for the fee-manager (only once)
+        _feeManager.recordLaunch();
+        
+        // 2. Enable transfers
         _unpause();
+        
+        // 3. Emit ecosystem event
         _eventsContract.emitLaunch(block.timestamp);
     }
     

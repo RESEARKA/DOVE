@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import "../token/DOVE.sol";
 import "../token/DOVEEvents.sol";
 import "../token/DOVEInfo.sol";
+import "../admin/DOVEAdmin.sol";
 import "../admin/DOVEGovernance.sol";
 import "../interfaces/IDOVEAdmin.sol";
 
@@ -83,21 +84,12 @@ contract DOVEDeployer {
         );
         require(doveInitialized, "DOVE initialization failed");
         
-        // Grant deployer necessary roles
-        IDOVEAdmin(adminContract).grantRole(
-            IDOVEAdmin(adminContract).DEFAULT_ADMIN_ROLE(),
-            msg.sender
-        );
+        // Grant deployer necessary roles - use casting to DOVEAdmin for role access
+        DOVEAdmin admin = DOVEAdmin(adminContract);
         
-        IDOVEAdmin(adminContract).grantRole(
-            IDOVEAdmin(adminContract).FEE_MANAGER_ROLE(),
-            msg.sender
-        );
-        
-        IDOVEAdmin(adminContract).grantRole(
-            IDOVEAdmin(adminContract).EMERGENCY_ADMIN_ROLE(),
-            msg.sender
-        );
+        admin.grantRole(admin.DEFAULT_ADMIN_ROLE(), msg.sender);
+        admin.grantRole(admin.FEE_MANAGER_ROLE(), msg.sender);
+        admin.grantRole(admin.EMERGENCY_ADMIN_ROLE(), msg.sender);
         
         // Emit deployment event
         emit DOVEEcosystemDeployed(
