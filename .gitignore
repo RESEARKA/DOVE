@@ -71,3 +71,6 @@ o3_*_review.md
 !.yarn/sdks
 !.yarn/versions
 .pnp.*
+
+# Archive of previous implementation
+OLD-Failed-version/
