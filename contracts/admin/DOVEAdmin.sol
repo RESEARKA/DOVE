@@ -5,19 +5,21 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "../interfaces/IDOVE.sol";
 import "../interfaces/IDOVEAdmin.sol";
+import "../interfaces/IAdminGovHooks.sol";
 
 /**
  * @title DOVE Admin Contract
  * @dev Manages administrative functions for the DOVE token
  * Centralizes role management and provides controlled access to token features
  */
-contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
+contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks {
     // ================ Role Constants ================
     
     // Role definitions
     bytes32 public constant FEE_MANAGER_ROLE = keccak256("FEE_MANAGER_ROLE");
     bytes32 public constant EMERGENCY_ADMIN_ROLE = keccak256("EMERGENCY_ADMIN_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+    bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
     
     // ================ State Variables ================
     
@@ -38,6 +40,14 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
     // Constant for launch operation identifier
     bytes32 private constant LAUNCH_OP = keccak256("dove.admin.launch");
 
+    // Admin update proposals
+    struct AdminProposal {
+        address proposedAdmin;
+        bool executed;
+    }
+    
+    mapping(uint256 => AdminProposal) private _adminProposals;
+    
     // ================ Events ================
     
     // Events inherited from IDOVEAdmin interface
@@ -48,6 +58,10 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
     event OperationCancelled(bytes32 indexed operationId);
     event Launch();
     event OperationExecuted(bytes32 indexed operationId);
+    
+    // Governance events
+    event AdminProposalCreated(uint256 indexed proposalId, address proposedAdmin);
+    event AdminProposalExecuted(uint256 indexed proposalId, address proposedAdmin);
     
     // ================ Constructor ================
     
@@ -63,6 +77,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
         _setupRole(FEE_MANAGER_ROLE, initialAdmin);
         _setupRole(EMERGENCY_ADMIN_ROLE, initialAdmin);
         _setupRole(PAUSER_ROLE, initialAdmin);
+        _setupRole(GOVERNANCE_ROLE, initialAdmin);
     }
     
     // ================ Modifiers ================
@@ -98,6 +113,14 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
         _;
     }
     
+    /**
+     * @dev Only governance role can call this
+     */
+    modifier onlyGovernance() {
+        require(hasRole(GOVERNANCE_ROLE, msg.sender), "Caller is not governance");
+        _;
+    }
+
     // ================ External Functions ================
     
     /**
@@ -301,6 +324,82 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin {
         require(_operationTimelocks[operationId] != 0, "Operation not scheduled");
         delete _operationTimelocks[operationId];
         emit OperationCancelled(operationId);
+    }
+    
+    /**
+     * @dev Create a proposal to update the admin
+     * @param proposedAdmin Address of the proposed admin
+     * @return Proposal ID
+     */
+    function createAdminProposal(address proposedAdmin) external nonReentrant onlyRole(GOVERNANCE_ROLE) returns (uint256) {
+        require(proposedAdmin != address(0), "Proposed admin cannot be zero address");
+        
+        uint256 proposalId = _globalNonce++;
+        _adminProposals[proposalId] = AdminProposal(proposedAdmin, false);
+        emit AdminProposalCreated(proposalId, proposedAdmin);
+        return proposalId;
+    }
+    
+    /**
+     * @dev Execute an admin proposal
+     * @param proposalId ID of the proposal to execute
+     * @return True if proposal is executed successfully
+     */
+    function executeAdminProposal(uint256 proposalId) external nonReentrant onlyRole(GOVERNANCE_ROLE) returns (bool) {
+        require(_adminProposals[proposalId].executed == false, "Proposal already executed");
+        
+        address proposedAdmin = _adminProposals[proposalId].proposedAdmin;
+        _adminProposals[proposalId].executed = true;
+        emit AdminProposalExecuted(proposalId, proposedAdmin);
+        
+        // Update the admin role
+        _setupRole(DEFAULT_ADMIN_ROLE, proposedAdmin);
+        return true;
+    }
+    
+    // ================ Governance Hooks ================
+    
+    /**
+     * @dev Called by governance when a new admin proposal is created
+     * @param proposalId ID of the proposal
+     * @param proposedAdmin Address of the proposed admin
+     */
+    function _gov_onProposalCreated(
+        uint256 proposalId,
+        address proposedAdmin
+    ) external override onlyGovernance {
+        require(proposedAdmin != address(0), "Proposed admin cannot be zero address");
+        require(_adminProposals[proposalId].proposedAdmin == address(0), "Proposal already exists");
+        
+        _adminProposals[proposalId] = AdminProposal({
+            proposedAdmin: proposedAdmin,
+            executed: false
+        });
+        
+        emit AdminProposalCreated(proposalId, proposedAdmin);
+    }
+    
+    /**
+     * @dev Called by governance when a proposal receives enough approvals
+     * @param proposalId ID of the proposal
+     * @param proposedAdmin Address of the proposed admin
+     */
+    function _gov_onProposalExecuted(
+        uint256 proposalId,
+        address proposedAdmin
+    ) external override onlyGovernance {
+        AdminProposal storage proposal = _adminProposals[proposalId];
+        
+        require(proposal.proposedAdmin != address(0), "Proposal does not exist");
+        require(proposal.proposedAdmin == proposedAdmin, "Admin address mismatch");
+        require(!proposal.executed, "Proposal already executed");
+        
+        proposal.executed = true;
+        
+        // Update the admin role
+        _setupRole(DEFAULT_ADMIN_ROLE, proposedAdmin);
+        
+        emit AdminProposalExecuted(proposalId, proposedAdmin);
     }
     
     // ================ Test Functions ================

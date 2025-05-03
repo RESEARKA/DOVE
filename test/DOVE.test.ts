@@ -386,30 +386,65 @@ describe("DOVE Token Ecosystem", function () {
   });
 
   describe("Governance Functionality", function () {
-    // Skip this test for now as it requires DOVEAdmin contract changes to handle governance callbacks
-    it.skip("Should implement admin contract updates with multiple approvals", async function () {
+    it("Should implement admin contract updates with multiple approvals", async function () {
       const { doveToken, doveAdmin, doveGovernance, admin, emergencyAdmin } = 
         await loadFixture(deployTokenFixture);
       
-      /* 
-       * NOTE: To properly test governance functionality, DOVEAdmin contract needs to expose 
-       * callback functions that DOVEGovernance can call. Without these, impersonating the admin
-       * contract fails because the governance contract tries to call functions that don't exist.
-       * 
-       * Recommendation: Add governance hook functions to DOVEAdmin such as:
-       * - _gov_onProposalCreated(uint256 id, address proposer)  
-       * - _gov_onProposalExecuted(uint256 id)
-       * 
-       * And have the governance contract call these hooks instead of assuming they exist.
-       */
+      // Ensure proper roles
+      const GOVERNANCE_ROLE = ethers.keccak256(ethers.toUtf8Bytes("GOVERNANCE_ROLE"));
+      const DEFAULT_ADMIN_ROLE = ethers.ZeroHash; // DEFAULT_ADMIN_ROLE is 0x00 in OpenZeppelin
       
-      // Create new admin contract
+      // Grant GOVERNANCE_ROLE to DOVEGovernance
+      if (!await doveAdmin.hasRole(GOVERNANCE_ROLE, await doveGovernance.getAddress())) {
+        await doveAdmin.connect(admin).grantRole(GOVERNANCE_ROLE, await doveGovernance.getAddress());
+      }
+      
+      // When we use emergencyAdmin to approve, it also needs to have DEFAULT_ADMIN_ROLE
+      if (!await doveAdmin.hasRole(DEFAULT_ADMIN_ROLE, await emergencyAdmin.getAddress())) {
+        await doveAdmin.connect(admin).grantRole(DEFAULT_ADMIN_ROLE, await emergencyAdmin.getAddress());
+      }
+
+      // Create new admin contract to propose
       const DOVEAdminFactory = await ethers.getContractFactory("DOVEAdmin");
-      const newDOVEAdmin = await DOVEAdminFactory.deploy(await admin.getAddress());
+      const newDOVEAdmin = await DOVEAdminFactory.deploy(await emergencyAdmin.getAddress());
+      await newDOVEAdmin.waitForDeployment();
       
-      // For now, we'll just check that the governance contract was deployed and linked correctly
-      const currentAdmin = await doveGovernance.getAdminContract();
-      expect(currentAdmin).to.equal(await doveAdmin.getAddress());
+      // Current admin contract
+      const currentAdminAddr = await doveGovernance.getAdminContract();
+      expect(currentAdminAddr).to.equal(await doveAdmin.getAddress());
+      
+      // Propose admin update from the admin account
+      const proposeTx = await doveGovernance.connect(admin).proposeAdminUpdate(
+        await newDOVEAdmin.getAddress()
+      );
+      
+      // Get the proposal ID - in ethers v6, we use a simple sequential ID
+      const proposalId = 0;
+      
+      // Verify proposal was created properly
+      const [newAdmin, timestamp, approvalCount, executed] = 
+        await doveGovernance.getAdminUpdateProposal(proposalId);
+      
+      expect(newAdmin).to.equal(await newDOVEAdmin.getAddress());
+      expect(approvalCount).to.equal(1); // Proposer auto-approved
+      expect(executed).to.be.false;
+      
+      // Approve from another admin (emergency admin)
+      await doveGovernance.connect(emergencyAdmin).approveAdminUpdate(proposalId);
+      
+      // Verify the proposal is now executed
+      const [_, __, approvals, isExecuted] = 
+        await doveGovernance.getAdminUpdateProposal(proposalId);
+      
+      expect(approvals).to.equal(2); // 2 approvals now
+      expect(isExecuted).to.be.true;
+      
+      // Verify admin contract was updated
+      const newAdminAddr = await doveGovernance.getAdminContract();
+      expect(newAdminAddr).to.equal(await newDOVEAdmin.getAddress());
+      
+      // Verify roles were transferred properly - emergencyAdmin should have DEFAULT_ADMIN_ROLE in new contract
+      expect(await newDOVEAdmin.hasRole(DEFAULT_ADMIN_ROLE, await emergencyAdmin.getAddress())).to.be.true;
     });
   });
 });

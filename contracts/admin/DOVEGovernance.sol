@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "../interfaces/IDOVEAdmin.sol";
 import "../interfaces/IDOVEGovernance.sol";
+import "../interfaces/IAdminGovHooks.sol";
 
 /**
  * @title DOVEGovernance
@@ -67,10 +68,24 @@ contract DOVEGovernance is IDOVEGovernance, ReentrancyGuard {
     // ================ Modifiers ================
     
     /**
-     * @dev Restricts function to admin contract
+     * @dev Restricts function to admin roles
+     * Allows calls from:
+     * 1. Accounts with DEFAULT_ADMIN_ROLE in the admin contract
+     * 2. The admin contract itself
      */
     modifier onlyAdmin() {
-        require(msg.sender == address(_adminContract), "Caller is not the admin contract");
+        // Check if the caller is the admin contract
+        if (msg.sender == address(_adminContract)) {
+            _;
+            return;
+        }
+        
+        // Check if the caller has the DEFAULT_ADMIN_ROLE in the admin contract
+        bytes32 DEFAULT_ADMIN_ROLE = 0x00;  // OpenZeppelin's DEFAULT_ADMIN_ROLE is 0x00
+        require(
+            IDOVEAdmin(_adminContract).hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
+            "Caller is not an admin"
+        );
         _;
     }
     
@@ -95,6 +110,12 @@ contract DOVEGovernance is IDOVEGovernance, ReentrancyGuard {
         proposal.approvalCount = 1; // Proposer automatically approves
         proposal.hasApproved[msg.sender] = true;
         proposal.executed = false;
+        
+        // Call the governance hook in the admin contract
+        IAdminGovHooks(address(_adminContract))._gov_onProposalCreated(
+            proposalId,
+            newAdminContract
+        );
         
         emit AdminUpdateProposed(proposalId, msg.sender, newAdminContract);
         emit AdminUpdateApproved(proposalId, msg.sender);
@@ -127,6 +148,14 @@ contract DOVEGovernance is IDOVEGovernance, ReentrancyGuard {
         if (proposal.approvalCount >= REQUIRED_APPROVALS) {
             proposal.executed = true;
             address oldAdmin = address(_adminContract);
+            
+            // Call the governance hook in the admin contract
+            IAdminGovHooks(address(_adminContract))._gov_onProposalExecuted(
+                proposalId,
+                proposal.newAdmin
+            );
+            
+            // Update the admin contract reference
             _adminContract = IDOVEAdmin(proposal.newAdmin);
             
             emit AdminUpdateExecuted(proposalId, oldAdmin, proposal.newAdmin);
