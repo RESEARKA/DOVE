@@ -3,30 +3,20 @@ pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 import "../interfaces/IDOVE.sol";
 import "../interfaces/IDOVEAdmin.sol";
-import "../interfaces/IDOVEGovernance.sol";
 import "../interfaces/IDOVEInfo.sol";
-import "./DOVEFees.sol";
+import "../interfaces/IDOVEGovernance.sol";
 import "./DOVEEvents.sol";
+import "./DOVEFees.sol";
 
 /**
  * @title DOVE Token
- * @dev Implementation of the DOVE token with charity fee and early-sell tax mechanisms
- * 
- * IMPORTANT FEE STRUCTURE NOTICE:
- * This token implements two types of fees that affect transfer amounts:
- * 1. Charity Fee (0.5%): Applied to all transfers except excluded addresses
- *    - Fee is sent to a designated charity wallet
- * 2. Early Sell Tax (5% to 0%): Applied only when selling to DEX in first 72 hours
- *    - Tax rate decreases over time (5%, 3%, 1%, then 0%)
- *    - Tax amount is burned from supply
- * 
- * Users should be aware that the amount received by the recipient will be
- * less than the amount sent by the sender due to these fees.
+ * @dev ERC20 token with fee mechanics, charity fees, and governance
  */
+
 contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     // ================ Constants ================
     
@@ -74,9 +64,15 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @param initialSupplyRecipient Address to receive the initial token supply
      */
     constructor(address adminContract, address charityWallet, address initialSupplyRecipient) ERC20("DOVE", "DOVE") {
-        require(adminContract != address(0), "Admin contract cannot be zero address");
-        require(charityWallet != address(0), "Charity wallet cannot be zero address");
-        require(initialSupplyRecipient != address(0), "Supply recipient cannot be zero address");
+        if (adminContract == address(0)) {
+            revert ZeroAddress();
+        }
+        if (charityWallet == address(0)) {
+            revert ZeroAddress();
+        }
+        if (initialSupplyRecipient == address(0)) {
+            revert ZeroAddress();
+        }
         
         // Set admin contract
         _adminContract = IDOVEAdmin(adminContract);
@@ -111,11 +107,21 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         address governanceContract,
         address infoContract
     ) external returns (bool) {
-        require(msg.sender == address(_adminContract), "Only admin can initialize");
-        require(!_fullyInitialized, "Already fully initialized");
-        require(eventsContract != address(0), "Events contract cannot be zero address");
-        require(governanceContract != address(0), "Governance contract cannot be zero address");
-        require(infoContract != address(0), "Info contract cannot be zero address");
+        if (msg.sender != address(_adminContract)) {
+            revert NotAdmin();
+        }
+        if (_fullyInitialized) {
+            revert AlreadyInitialized();
+        }
+        if (eventsContract == address(0)) {
+            revert ZeroAddress();
+        }
+        if (governanceContract == address(0)) {
+            revert ZeroAddress();
+        }
+        if (infoContract == address(0)) {
+            revert ZeroAddress();
+        }
         
         _eventsContract = DOVEEvents(eventsContract);
         _governanceContract = IDOVEGovernance(governanceContract);
@@ -147,7 +153,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @dev Restricts function to admin contract
      */
     modifier onlyAdmin() {
-        require(msg.sender == address(_adminContract), "Caller is not the admin contract");
+        if (msg.sender != address(_adminContract)) {
+            revert NotAdmin();
+        }
         _;
     }
     
@@ -155,7 +163,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @dev Ensures all contracts are initialized
      */
     modifier whenInitialized() {
-        require(_fullyInitialized, "Not fully initialized");
+        if (!_fullyInitialized) {
+            revert NotInitialized();
+        }
         _;
     }
     
@@ -166,7 +176,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @notice Can only be called by the admin contract
      */
     function launch() external override onlyAdmin whenInitialized {
-        require(paused(), "Token is already launched");
+        if (!paused()) {
+            revert AlreadyLaunched();
+        }
         
         // 1. Remember the launch for the fee-manager (only once)
         _feeManager.recordLaunch();
@@ -239,7 +251,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         // DOVEInfo is the single source of truth, so we only check there
         // This ensures the same state is used in both checks and enforcements
         bool isEnabled = _infoContract.getMaxTransactionAmount() != type(uint256).max;
-        require(isEnabled, "Max transaction limit already disabled");
+        if (!isEnabled) {
+            revert AlreadyInitialized();
+        }
         
         // Update DOVEInfo only - remove dependence on local state
         _infoContract.setMaxTxLimitEnabled(false);
@@ -252,7 +266,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @dev Disable max wallet limit permanently
      */
     function disableMaxWalletLimit() external override onlyAdmin whenInitialized {
-        require(_isMaxWalletLimitEnabled, "Max wallet limit already disabled");
+        if (!_isMaxWalletLimitEnabled) {
+            revert AlreadyInitialized();
+        }
         _isMaxWalletLimitEnabled = false;
         _infoContract.setMaxWalletLimitEnabled(false);
         emit MaxWalletLimitDisabled();
@@ -266,7 +282,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @return Whether the transfer was successful
      */
     function transferFeeFromContract(address from, address to, uint256 amount) external override returns (bool) {
-        require(msg.sender == address(_feeManager), "Only fee manager can call");
+        if (msg.sender != address(_feeManager)) {
+            revert OnlyFeeManagerCanCall();
+        }
         
         // Transfer the fee
         _transfer(from, to, amount);
@@ -280,7 +298,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @return Whether the burn was successful
      */
     function burnFeeFromContract(address from, uint256 amount) external override returns (bool) {
-        require(msg.sender == address(_feeManager), "Only fee manager can call");
+        if (msg.sender != address(_feeManager)) {
+            revert OnlyFeeManagerCanCall();
+        }
         
         // Burn by transferring to dead address
         _transfer(from, DEAD_ADDRESS, amount);
@@ -308,7 +328,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @dev Pass event emission to events contract (called by fee manager)
      */
     function emitCharityWalletUpdated(address oldWallet, address newWallet) external override whenInitialized {
-        require(msg.sender == address(_feeManager), "Only fee manager can call");
+        if (msg.sender != address(_feeManager)) {
+            revert OnlyFeeManagerCanCall();
+        }
         _eventsContract.emitCharityWalletUpdated(oldWallet, newWallet);
     }
     
@@ -316,7 +338,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @dev Pass event emission to events contract (called by fee manager)
      */
     function emitExcludedFromFeeUpdated(address account, bool excluded) external override whenInitialized {
-        require(msg.sender == address(_feeManager), "Only fee manager can call");
+        if (msg.sender != address(_feeManager)) {
+            revert OnlyFeeManagerCanCall();
+        }
         _eventsContract.emitExcludedFromFeeUpdated(account, excluded);
     }
     
@@ -324,7 +348,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @dev Pass event emission to events contract (called by fee manager)
      */
     function emitDexStatusUpdated(address dexAddress, bool dexStatus) external override whenInitialized {
-        require(msg.sender == address(_feeManager), "Only fee manager can call");
+        if (msg.sender != address(_feeManager)) {
+            revert OnlyFeeManagerCanCall();
+        }
         _eventsContract.emitDexStatusUpdated(dexAddress, dexStatus);
     }
     
@@ -332,7 +358,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
      * @dev Pass event emission to events contract (called by fee manager)
      */
     function emitEarlySellTaxDisabled() external override whenInitialized {
-        require(msg.sender == address(_feeManager), "Only fee manager can call");
+        if (msg.sender != address(_feeManager)) {
+            revert OnlyFeeManagerCanCall();
+        }
         _eventsContract.emitEarlySellTaxDisabled();
     }
     
@@ -434,14 +462,18 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         address recipient,
         uint256 amount
     ) internal override whenNotPaused {
-        require(sender != address(0), "Transfer from the zero address");
-        require(recipient != address(0), "Transfer to the zero address");
+        if (sender == address(0)) {
+            revert ZeroAddress();
+        }
+        if (recipient == address(0)) {
+            revert ZeroAddress();
+        }
         
         // Get max transaction amount from DOVEInfo instead of using local state
         // This ensures that when limits are disabled in DOVEInfo, they are immediately reflected here
         uint256 maxAmount = _infoContract.getMaxTransactionAmount();
         if (amount > maxAmount) {
-            revert("Transfer amount exceeds the maximum allowed");
+            revert TransferExceedsMaxAmount();
         }
         
         // Process fees through fee manager
@@ -489,4 +521,13 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     function _beforeTokenTransfer(address from, address to, uint256 amount) internal override whenNotPaused {
         super._beforeTokenTransfer(from, to, amount);
     }
+    
+    // Custom errors - more gas efficient than require strings
+    error ZeroAddress();
+    error AlreadyInitialized();
+    error NotInitialized();
+    error NotAdmin();
+    error AlreadyLaunched();
+    error TransferExceedsMaxAmount();
+    error OnlyFeeManagerCanCall();
 }

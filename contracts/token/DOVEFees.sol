@@ -10,6 +10,7 @@ import "../interfaces/IDOVE.sol";
  * @dev Handles fee calculations and processing for the DOVE token
  * Encapsulates fee-related logic to maintain separation of concerns
  */
+
 contract DOVEFees is ReentrancyGuard {
     // ================ Events ================
     
@@ -35,13 +36,21 @@ contract DOVEFees is ReentrancyGuard {
     uint256 private _launchTimestamp;
     bool private _isLaunched;
     
+    // Custom errors for gas efficiency - prefixed with "Fees" to avoid naming collisions
+    error FeesNotDOVEToken();
+    error FeesZeroAddressNotAllowed();
+    error FeesTokenAlreadyLaunched();
+    error FeesEarlySellTaxAlreadyDisabled();
+    
     // ================ Modifiers ================
     
     /**
      * @dev Ensures only the DOVE token can call this contract
      */
     modifier onlyDOVE() {
-        require(msg.sender == _doveToken, "Caller is not the DOVE token");
+        if (msg.sender != _doveToken) {
+            revert FeesNotDOVEToken();
+        }
         _;
     }
     
@@ -53,8 +62,12 @@ contract DOVEFees is ReentrancyGuard {
      * @param initialCharityWallet Initial charity wallet address
      */
     constructor(address doveToken, address initialCharityWallet) {
-        require(doveToken != address(0), "DOVE token cannot be zero address");
-        require(initialCharityWallet != address(0), "Charity wallet cannot be zero address");
+        if (doveToken == address(0)) {
+            revert FeesZeroAddressNotAllowed();
+        }
+        if (initialCharityWallet == address(0)) {
+            revert FeesZeroAddressNotAllowed();
+        }
         
         _doveToken = doveToken;
         _charityWallet = initialCharityWallet;
@@ -63,19 +76,19 @@ contract DOVEFees is ReentrancyGuard {
     // ================ External Functions ================
     
     /**
-     * @dev Process fees for a token transfer
-     * @param sender Sender address
-     * @param recipient Recipient address
-     * @param amount Token amount being transferred
-     * @return netAmount Amount after fees are deducted
+     * @dev Calculate fees for a transfer and apply them
+     * @param sender Sender of the transfer
+     * @param recipient Recipient of the transfer
+     * @param amount Amount being transferred
+     * @return netAmount Net amount after fees
      */
     function processFees(
         address sender,
         address recipient,
         uint256 amount
     ) external onlyDOVE returns (uint256 netAmount) {
-        // Skip fees for excluded addresses or if token not launched
-        if (!_isLaunched || _isExcludedFromFee[sender]) {
+        // Skip fees for excluded addresses
+        if (_isExcludedFromFee[sender] || _isExcludedFromFee[recipient]) {
             return amount;
         }
         
@@ -83,10 +96,15 @@ contract DOVEFees is ReentrancyGuard {
         netAmount = amount;
         
         // Apply charity fee (applies to all non-excluded transfers)
+        // Cache fee calculation result for gas optimization
         uint256 charityFeeAmount = FeeLibrary.calculateCharityFee(amount);
+        
+        // Only process if there's an actual fee and charity wallet is set
         if (charityFeeAmount > 0 && _charityWallet != address(0)) {
             // CHECKS-EFFECTS: Reduce the net amount by the fee
-            netAmount -= charityFeeAmount;
+            unchecked {
+                netAmount = netAmount - charityFeeAmount;
+            }
             
             // INTERACTIONS: Transfer fee to charity wallet
             bool success = IDOVE(_doveToken).transferFeeFromContract(sender, _charityWallet, charityFeeAmount);
@@ -94,18 +112,27 @@ contract DOVEFees is ReentrancyGuard {
                 emit CharityFeeTaken(sender, recipient, charityFeeAmount);
             } else {
                 // If fee transfer fails, add it back to net amount
-                netAmount += charityFeeAmount;
+                unchecked {
+                    netAmount = netAmount + charityFeeAmount;
+                }
             }
         }
         
         // Apply early sell tax only for DEX sells
         if (_isEarlySellTaxEnabled && dexAddresses[recipient]) {
-            uint256 timeSinceLaunch = block.timestamp - _launchTimestamp;
+            // Cache timestamp calculation to avoid multiple storage reads
+            uint256 timeSinceLaunch;
+            unchecked {
+                timeSinceLaunch = block.timestamp - _launchTimestamp;
+            }
+            
             uint256 sellTaxAmount = FeeLibrary.calculateEarlySellTax(netAmount, timeSinceLaunch);
             
             if (sellTaxAmount > 0) {
                 // CHECKS-EFFECTS: Reduce the net amount by the tax
-                netAmount -= sellTaxAmount;
+                unchecked {
+                    netAmount = netAmount - sellTaxAmount;
+                }
                 
                 // INTERACTIONS: Burn the tax amount (sent to dead address)
                 bool success = IDOVE(_doveToken).burnFeeFromContract(sender, sellTaxAmount);
@@ -113,7 +140,9 @@ contract DOVEFees is ReentrancyGuard {
                     emit EarlySellTaxTaken(sender, recipient, sellTaxAmount);
                 } else {
                     // If burn fails, add it back to net amount
-                    netAmount += sellTaxAmount;
+                    unchecked {
+                        netAmount = netAmount + sellTaxAmount;
+                    }
                 }
             }
         }
@@ -126,7 +155,9 @@ contract DOVEFees is ReentrancyGuard {
      * @param newCharityWallet New charity wallet address
      */
     function setCharityWallet(address newCharityWallet) external onlyDOVE {
-        require(newCharityWallet != address(0), "New charity wallet cannot be zero address");
+        if (newCharityWallet == address(0)) {
+            revert FeesZeroAddressNotAllowed();
+        }
         
         address oldWallet = _charityWallet;
         _charityWallet = newCharityWallet;
@@ -141,7 +172,9 @@ contract DOVEFees is ReentrancyGuard {
      * @param excluded Whether to exclude from fees
      */
     function setExcludedFromFee(address account, bool excluded) external onlyDOVE {
-        require(account != address(0), "Account cannot be zero address");
+        if (account == address(0)) {
+            revert FeesZeroAddressNotAllowed();
+        }
         
         _isExcludedFromFee[account] = excluded;
         
@@ -155,7 +188,9 @@ contract DOVEFees is ReentrancyGuard {
      * @param _isDex Boolean indicating if the address is a DEX
      */
     function setDexStatus(address dexAddress, bool _isDex) external onlyDOVE {
-        require(dexAddress != address(0), "DEX address cannot be zero address");
+        if (dexAddress == address(0)) {
+            revert FeesZeroAddressNotAllowed();
+        }
         
         dexAddresses[dexAddress] = _isDex;
         
@@ -167,7 +202,10 @@ contract DOVEFees is ReentrancyGuard {
      * @dev Disable early sell tax permanently
      */
     function disableEarlySellTax() external onlyDOVE {
-        require(_isEarlySellTaxEnabled, "Early sell tax already disabled");
+        if (!_isEarlySellTaxEnabled) {
+            revert FeesEarlySellTaxAlreadyDisabled();
+        }
+        
         _isEarlySellTaxEnabled = false;
         
         // Emit event from DOVE token
@@ -178,7 +216,10 @@ contract DOVEFees is ReentrancyGuard {
      * @dev Record token launch
      */
     function recordLaunch() external onlyDOVE {
-        require(!_isLaunched, "Token already launched");
+        if (_isLaunched) {
+            revert FeesTokenAlreadyLaunched();
+        }
+        
         _isLaunched = true;
         _launchTimestamp = block.timestamp;
     }
