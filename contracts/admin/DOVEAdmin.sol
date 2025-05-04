@@ -16,7 +16,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
     // ================ Compile-time Configuration ================
     
     // Set to true only in test builds, must be false for production deployment
-    bool constant private TESTING = true; // SET TO FALSE BEFORE PRODUCTION DEPLOYMENT
+    bool constant private TESTING = true; // Will be set to false before mainnet deployment
     
     // Custom error for guarding test functions
     error TestFunctionDisabled();
