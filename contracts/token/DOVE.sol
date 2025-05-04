@@ -59,6 +59,12 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     // Special addresses that are always exempt from fees
     mapping(address => bool) private _alwaysFeeExempt;
     
+    // Mapping of addresses that are excluded from max wallet limit
+    mapping(address => bool) private _isExcludedFromMaxLimit;
+    
+    // Flag to prevent reentrancy during fee processing
+    bool private _inProcessingFees;
+    
     // ================ Constructor ================
     
     /**
@@ -215,12 +221,23 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     }
     
     /**
-     * @dev Set charity wallet address
-     * @param newCharityWallet New charity wallet address
-     * @notice Can only be called by the admin contract
+     * @dev Updates the charity wallet address
+     * @param newCharityWallet Address of the new charity wallet
      */
     function setCharityWallet(address newCharityWallet) external override onlyAdmin {
+        address oldWallet = _feeManager.getCharityWallet();
         _feeManager.setCharityWallet(newCharityWallet);
+        
+        // Remove old wallet from always-exempt list
+        _alwaysFeeExempt[oldWallet] = false;
+        
+        // Check if old wallet was manually excluded and remove that status too
+        if (_feeManager.isExcludedFromFee(oldWallet)) {
+            _feeManager.setExcludedFromFee(oldWallet, false);
+        }
+        
+        // Add new wallet to always-exempt list
+        _alwaysFeeExempt[newCharityWallet] = true;
     }
     
     /**
@@ -272,14 +289,27 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     
     /**
      * @dev Disable max wallet limit permanently
+     * @notice Can only be called by the admin contract
      */
-    function disableMaxWalletLimit() external override onlyAdmin whenInitialized {
+    function disableMaxWalletLimit() external override onlyAdmin {
+        // Only execute if max wallet limit is enabled
         if (!_isMaxWalletLimitEnabled) {
-            revert AlreadyInitialized();
+            revert MaxWalletLimitAlreadyDisabled();
         }
         _isMaxWalletLimitEnabled = false;
-        _infoContract.setMaxWalletLimitEnabled(false);
         emit MaxWalletLimitDisabled();
+    }
+    
+    /**
+     * @dev Set address exclusion from max wallet limit
+     * @param account Address to set exclusion for
+     * @param excluded Whether to exclude the address from the limit
+     * @notice Can only be called by the admin contract
+     */
+    function setExcludedFromMaxWalletLimit(address account, bool excluded) external onlyAdmin {
+        require(account != address(0), "Cannot set zero address");
+        _isExcludedFromMaxLimit[account] = excluded;
+        emit ExcludedFromMaxWalletLimit(account, excluded);
     }
     
     /**
@@ -294,7 +324,7 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
             revert OnlyFeeManagerCanCall();
         }
         
-        // Transfer the fee
+        // Transfer the fee - no need for nonReentrant since this is called from _transfer which is already protected
         _transfer(from, to, amount);
         return true;
     }
@@ -310,7 +340,7 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
             revert OnlyFeeManagerCanCall();
         }
         
-        // Burn by transferring to dead address
+        // Burn by transferring to DEAD_ADDRESS - no need for nonReentrant since this is called from _transfer
         _transfer(from, DEAD_ADDRESS, amount);
         return true;
     }
@@ -493,6 +523,25 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
             revert TransferExceedsMaxAmount();
         }
         
+        // Enforce max wallet limit if enabled
+        if (_isMaxWalletLimitEnabled) {
+            // Skip limit for transfers to/from DEAD_ADDRESS or to charity wallet
+            bool isExemptFromWalletLimit = 
+                recipient == DEAD_ADDRESS || 
+                recipient == _feeManager.getCharityWallet() ||
+                _isExcludedFromMaxLimit[recipient];
+                
+            if (!isExemptFromWalletLimit) {
+                uint256 recipientBalance = balanceOf(recipient);
+                uint256 maxWalletAmount = totalSupply() / 100; // 1% of total supply
+                
+                // Check that recipient's new balance won't exceed max wallet limit
+                if (recipientBalance + amount > maxWalletAmount) {
+                    revert TransferExceedsMaxWalletLimit();
+                }
+            }
+        }
+        
         // Handle tiny transfers to prevent dust accumulation due to integer division
         // For the charity fee of 0.5%, any amount less than (10000/50)+1 will result in 0 fee
         uint256 minFeeableAmount = (FeeLibrary.BASIS_POINTS / FeeLibrary.CHARITY_FEE) + 1;
@@ -502,8 +551,16 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
             return;
         }
         
+        // Direct internal transfer during fee processing to avoid recursion
+        if (_inProcessingFees) {
+            super._transfer(sender, recipient, amount);
+            return;
+        }
+        
         // Process fees through fee manager
+        _inProcessingFees = true;
         uint256 netAmount = _feeManager.processFees(sender, recipient, amount);
+        _inProcessingFees = false;
         
         // Transfer the net amount
         super._transfer(sender, recipient, netAmount);
@@ -556,4 +613,8 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     error AlreadyLaunched();
     error TransferExceedsMaxAmount();
     error OnlyFeeManagerCanCall();
+    error TransferExceedsMaxWalletLimit();
+    error MaxWalletLimitAlreadyDisabled();
+    
+    event ExcludedFromMaxWalletLimit(address indexed account, bool excluded);
 }

@@ -13,6 +13,14 @@ import "../interfaces/IAdminGovHooks.sol";
  * Centralizes role management and provides controlled access to token features
  */
 contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks {
+    // ================ Compile-time Configuration ================
+    
+    // Set to true only in test builds, must be false for production deployment
+    bool constant private TESTING = true; // SET TO FALSE BEFORE PRODUCTION DEPLOYMENT
+    
+    // Custom error for guarding test functions
+    error TestFunctionDisabled();
+    
     // ================ Role Constants ================
     
     // Role definitions
@@ -39,6 +47,9 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
     
     // Constant for launch operation identifier
     bytes32 private constant LAUNCH_OP = keccak256("dove.admin.launch");
+    bytes32 private constant DISABLE_TX_LIMIT_OP = keccak256("dove.admin.disableTxLimit");
+    bytes32 private constant DISABLE_EARLY_SELL_TAX_OP = keccak256("dove.admin.disableEarlySellTax");
+    bytes32 private constant DISABLE_MAX_WALLET_LIMIT_OP = keccak256("dove.admin.disableMaxWalletLimit");
 
     // Admin update proposals
     struct AdminProposal {
@@ -201,7 +212,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
      * @dev Disable early sell tax permanently (emergency function)
      * @notice Requires EMERGENCY_ADMIN_ROLE
      */
-    function disableEarlySellTax() external nonReentrant onlyRole(EMERGENCY_ADMIN_ROLE) {
+    function disableEarlySellTax() external nonReentrant onlyRole(EMERGENCY_ADMIN_ROLE) timelockRequired(DISABLE_EARLY_SELL_TAX_OP) {
         require(address(_doveToken) != address(0), "Token address not set");
         _doveToken.disableEarlySellTax();
     }
@@ -210,21 +221,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
      * @dev Disable max transaction limit permanently
      * @notice Requires DEFAULT_ADMIN_ROLE
      */
-    function disableMaxTxLimit() external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
-        // Create operation ID using nonce for uniqueness
-        bytes32 operationId = keccak256(abi.encodePacked("disableMaxTxLimit", msg.sender, _globalNonce++));
-        
-        // Require timelock for this critical operation
-        if (_operationTimelocks[operationId] == 0) {
-            _operationTimelocks[operationId] = block.timestamp + TIMELOCK_DELAY;
-            emit OperationScheduled(operationId, _operationTimelocks[operationId]);
-            return;
-        }
-        
-        // Check timelock elapsed
-        require(block.timestamp >= _operationTimelocks[operationId], "Timelock period not elapsed");
-        delete _operationTimelocks[operationId];
-        
+    function disableMaxTxLimit() external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked timelockRequired(DISABLE_TX_LIMIT_OP) {
         require(address(_doveToken) != address(0), "Token address not set");
         _doveToken.disableMaxTxLimit();
     }
@@ -232,7 +229,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
     /**
      * @dev Disable the max wallet limit
      */
-    function disableMaxWalletLimit() external nonReentrant notLocked {
+    function disableMaxWalletLimit() external nonReentrant notLocked timelockRequired(DISABLE_MAX_WALLET_LIMIT_OP) {
         require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Caller is not admin");
         _doveToken.disableMaxWalletLimit();
         emit MaxWalletLimitDisabled();
@@ -274,13 +271,17 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
      * @return bool Success indicator
      */
     function setTokenAddress(address tokenAddress) external override nonReentrant notLocked returns (bool) {
-        // Allow anybody the *first* time, afterwards only admins
-        if (address(_doveToken) != address(0)) {
-            _checkRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        }
-
+        // Verify the token hasn't already been set
         require(address(_doveToken) == address(0), "Token address already set");
         require(tokenAddress != address(0), "Token cannot be zero address");
+        
+        // Front-running protection: only allow token contract itself or admin to set token address
+        // During deployment, contract calls this from constructor (no code yet)
+        bool isTokenSelf = msg.sender == tokenAddress;
+        bool isCallerAdmin = hasRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        
+        require(isTokenSelf || isCallerAdmin, "Only token or admin can set address");
+        
         // We remove the code length check because contracts calling from their constructor
         // won't have code deployed yet, so the check would fail
         _doveToken = IDOVE(tokenAddress);
@@ -413,7 +414,8 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
      */
     function TEST_setOperationTimelockElapsed(bytes32 operationId) external onlyRole(DEFAULT_ADMIN_ROLE) {
         // Safety check: Don't execute in production
-        // We rely on the deployer to comment this out before deployment
+        if (!TESTING) revert TestFunctionDisabled();
+        
         // Only set if operation is already scheduled but not elapsed
         if (_operationTimelocks[operationId] > 0) {
             // Set to a timestamp in the past

@@ -76,7 +76,7 @@ contract DOVEFees is ReentrancyGuard {
     // ================ External Functions ================
     
     /**
-     * @dev Calculate fees for a transfer and apply them
+     * @dev Process all fees for a transfer
      * @param sender Sender of the transfer
      * @param recipient Recipient of the transfer
      * @param amount Amount being transferred
@@ -107,14 +107,24 @@ contract DOVEFees is ReentrancyGuard {
                 netAmount = netAmount - charityFeeAmount;
             }
             
-            // INTERACTIONS: Transfer fee to charity wallet
-            bool success = IDOVE(_doveToken).transferFeeFromContract(sender, _charityWallet, charityFeeAmount);
-            if (success) {
-                emit CharityFeeTaken(sender, recipient, charityFeeAmount);
-            } else {
-                // If fee transfer fails, add it back to net amount
-                unchecked {
-                    netAmount = netAmount + charityFeeAmount;
+            // Instead of calling the transferFeeFromContract directly, which can cause reentrancy,
+            // set the values for direct transfer
+            if (_charityWallet != address(0)) {
+                // INTERACTIONS: Transfer fee to charity wallet - call super._transfer to avoid reprocessing fees
+                try IDOVE(_doveToken).transferFeeFromContract(sender, _charityWallet, charityFeeAmount) returns (bool success) {
+                    if (success) {
+                        emit CharityFeeTaken(sender, recipient, charityFeeAmount);
+                    } else {
+                        // If fee transfer fails, add it back to net amount
+                        unchecked {
+                            netAmount = netAmount + charityFeeAmount;
+                        }
+                    }
+                } catch {
+                    // If the transfer call fails completely, add the fee back to net amount
+                    unchecked {
+                        netAmount = netAmount + charityFeeAmount;
+                    }
                 }
             }
         }
