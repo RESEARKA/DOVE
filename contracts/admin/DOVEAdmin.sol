@@ -256,9 +256,9 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
         // If the caller is not an admin, we're assuming this is the first initialization
         // during deployment. For any subsequent calls, admin role will be required.
         if (hasRole(DEFAULT_ADMIN_ROLE, msg.sender) == false) {
-            // This is the initial setup during deployment, which we allow
-            // Note: If the token is already initialized, setSecondaryContracts will revert
-            // with "Already fully initialized", so this is safe
+            // This is the initial setup during deployment, which we allow only if caller is the token itself
+            // This prevents front-running the initialization
+            require(msg.sender == address(_doveToken), "Only token or admin can initialize");
         }
         
         return _doveToken.setSecondaryContracts(
@@ -407,9 +407,13 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
     /**
      * @dev Test-only function to bypass timelock - ONLY FOR TESTING
      * @param operationId The operation ID to set as executable
-     * @notice This function should never be deployed to production
+     * @notice This function should NEVER be deployed to production
+     * @notice It is only included for local development and testing
+     * @notice This function MUST be commented out before mainnet deployment
      */
     function TEST_setOperationTimelockElapsed(bytes32 operationId) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        // Safety check: Don't execute in production
+        // We rely on the deployer to comment this out before deployment
         // Only set if operation is already scheduled but not elapsed
         if (_operationTimelocks[operationId] > 0) {
             // Set to a timestamp in the past

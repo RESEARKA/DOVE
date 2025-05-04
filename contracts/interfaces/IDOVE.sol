@@ -136,4 +136,11 @@ interface IDOVE {
      * @return Whether the token is paused
      */
     function paused() external view returns (bool);
+    
+    /**
+     * @dev Check if an address is always exempt from fees
+     * @param account Address to check
+     * @return Whether the address is always exempt from fees
+     */
+    function isAlwaysFeeExempt(address account) external view returns (bool);
 }

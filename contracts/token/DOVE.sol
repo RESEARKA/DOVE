@@ -11,6 +11,7 @@ import "../interfaces/IDOVEInfo.sol";
 import "../interfaces/IDOVEGovernance.sol";
 import "./DOVEEvents.sol";
 import "./DOVEFees.sol";
+import "../utils/FeeLibrary.sol";
 
 /**
  * @title DOVE Token
@@ -55,6 +56,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     // Whether all secondary contracts are set
     bool private _fullyInitialized;
     
+    // Special addresses that are always exempt from fees
+    mapping(address => bool) private _alwaysFeeExempt;
+    
     // ================ Constructor ================
     
     /**
@@ -85,6 +89,10 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         
         // Mint total supply to the specified recipient (not always deployer)
         _mint(initialSupplyRecipient, TOTAL_SUPPLY);
+        
+        // Mark special addresses as always fee exempt
+        _alwaysFeeExempt[DEAD_ADDRESS] = true;
+        _alwaysFeeExempt[charityWallet] = true;
         
         // Self-register with admin contract
         IDOVEAdmin(adminContract).setTokenAddress(address(this));
@@ -452,6 +460,15 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
     }
     
     /**
+     * @dev Check if an address is always fee exempt
+     * @param account Address to check
+     * @return Whether the address is always fee exempt
+     */
+    function isAlwaysFeeExempt(address account) external view returns (bool) {
+        return _alwaysFeeExempt[account];
+    }
+    
+    /**
      * @dev ERC20 _transfer override
      * @param sender Sender address
      * @param recipient Recipient address
@@ -477,8 +494,9 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
         }
         
         // Handle tiny transfers to prevent dust accumulation due to integer division
-        // For the charity fee of 0.5%, any amount less than 200 will result in 0 fee
-        if (amount < 200) {
+        // For the charity fee of 0.5%, any amount less than (10000/50)+1 will result in 0 fee
+        uint256 minFeeableAmount = (FeeLibrary.BASIS_POINTS / FeeLibrary.CHARITY_FEE) + 1;
+        if (amount < minFeeableAmount) {
             // Transfer without applying fees for tiny amounts
             super._transfer(sender, recipient, amount);
             return;

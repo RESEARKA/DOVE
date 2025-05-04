@@ -87,8 +87,9 @@ contract DOVEFees is ReentrancyGuard {
         address recipient,
         uint256 amount
     ) external onlyDOVE returns (uint256 netAmount) {
-        // Skip fees for excluded addresses
-        if (_isExcludedFromFee[sender] || _isExcludedFromFee[recipient]) {
+        // Skip fees for excluded addresses and always fee exempt addresses
+        if (_isExcludedFromFee[sender] || _isExcludedFromFee[recipient] ||
+            IDOVE(_doveToken).isAlwaysFeeExempt(sender) || IDOVE(_doveToken).isAlwaysFeeExempt(recipient)) {
             return amount;
         }
         
