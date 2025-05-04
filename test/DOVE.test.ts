@@ -264,6 +264,48 @@ describe("DOVE Token Ecosystem", function () {
       expect(user2Balance).to.equal(expectedUser2Amount);
     });
 
+    it("Should handle tiny transfers correctly (under 200 wei)", async function () {
+      const { doveToken, deployer, user1, user2, charityWallet } = await loadFixture(deployTokenFixture);
+      
+      // Ensure user1 has some tokens for testing
+      const initialAmount = ethers.parseEther("1000"); // 1000 tokens
+      await doveToken.connect(deployer).transfer(await user1.getAddress(), initialAmount);
+      
+      // Get initial balances
+      const initialUser2Balance = await doveToken.balanceOf(await user2.getAddress());
+      const initialCharityBalance = await doveToken.balanceOf(await charityWallet.getAddress());
+      
+      // Test a single tiny transfer (50 wei - well below the 200 threshold)
+      const tinyAmount = 50n;
+      await doveToken.connect(user1).transfer(await user2.getAddress(), tinyAmount);
+      
+      // Check that exact amount was received (no fees taken)
+      const newUser2Balance = await doveToken.balanceOf(await user2.getAddress());
+      expect(newUser2Balance).to.equal(initialUser2Balance + tinyAmount);
+      
+      // Verify charity wallet received no fees
+      const finalCharityBalance = await doveToken.balanceOf(await charityWallet.getAddress());
+      expect(finalCharityBalance).to.equal(initialCharityBalance);
+      
+      // Now test amount above the threshold (500 wei)
+      const normalAmount = 500n;
+      const expectedFee = (normalAmount * BigInt(CHARITY_FEE_BP)) / 10000n;
+      
+      const beforeNormalUser2Balance = await doveToken.balanceOf(await user2.getAddress());
+      const beforeNormalCharityBalance = await doveToken.balanceOf(await charityWallet.getAddress());
+      
+      // Execute normal transfer
+      await doveToken.connect(user1).transfer(await user2.getAddress(), normalAmount);
+      
+      // Verify user2 received amount minus fee
+      const afterNormalUser2Balance = await doveToken.balanceOf(await user2.getAddress());
+      expect(afterNormalUser2Balance).to.equal(beforeNormalUser2Balance + normalAmount - expectedFee);
+      
+      // Verify charity wallet received fee
+      const afterNormalCharityBalance = await doveToken.balanceOf(await charityWallet.getAddress());
+      expect(afterNormalCharityBalance).to.equal(beforeNormalCharityBalance + expectedFee);
+    });
+
     it("Should exclude addresses from fees", async function () {
       const { doveToken, doveAdmin, doveInfo, user1, user2, charityWallet, feeManager, admin } = 
         await loadFixture(deployTokenFixture);

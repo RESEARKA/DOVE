@@ -476,6 +476,14 @@ contract DOVE is ERC20, AccessControl, Pausable, ReentrancyGuard, IDOVE {
             revert TransferExceedsMaxAmount();
         }
         
+        // Handle tiny transfers to prevent dust accumulation due to integer division
+        // For the charity fee of 0.5%, any amount less than 200 will result in 0 fee
+        if (amount < 200) {
+            // Transfer without applying fees for tiny amounts
+            super._transfer(sender, recipient, amount);
+            return;
+        }
+        
         // Process fees through fee manager
         uint256 netAmount = _feeManager.processFees(sender, recipient, amount);
         
