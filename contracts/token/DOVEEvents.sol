@@ -3,175 +3,67 @@ pragma solidity 0.8.24;
 
 /**
  * @title DOVEEvents
- * @dev Event emission contract for DOVE token ecosystem
- * This contract centralizes all event declarations and emission functions
+ * @dev Event declarations for DOVE token ecosystem
+ * This interface centralizes all event declarations for the DOVE token
  */
-contract DOVEEvents {
-    // ================ Events ================
-    
+interface DOVEEvents {
     /**
-     * @dev Emitted when the token is launched
-     * @param timestamp Time of launch
+     * @dev Emitted when tokens are transferred with fee applied
+     * @param sender Address sending the tokens
+     * @param recipient Address receiving the tokens
+     * @param amount Total amount of tokens sent
+     * @param feeAmount Amount deducted as fee
      */
-    event Launch(uint256 timestamp);
+    event TransferWithFee(address indexed sender, address indexed recipient, uint256 amount, uint256 feeAmount);
     
     /**
-     * @dev Emitted when the charity wallet is changed
-     * @param oldWallet Previous charity wallet address
+     * @dev Emitted when the charity wallet is updated
      * @param newWallet New charity wallet address
      */
-    event CharityWalletUpdated(address indexed oldWallet, address indexed newWallet);
+    event CharityWalletUpdated(address indexed newWallet);
     
     /**
-     * @dev Emitted when an address is excluded from fees
-     * @param account Address that was excluded
-     * @param isExcluded Whether the address is excluded
+     * @dev Emitted when liquidity manager is updated
+     * @param newManager New liquidity manager address
      */
-    event ExcludedFromFeeUpdated(address indexed account, bool isExcluded);
+    event LiquidityManagerUpdated(address indexed newManager);
     
     /**
-     * @dev Emitted when a DEX address status is set
-     * @param dexAddress Address that was updated
-     * @param dexStatus Whether the address is a DEX
-     */
-    event DexStatusUpdated(address indexed dexAddress, bool dexStatus);
-    
-    /**
-     * @dev Emitted when the early sell tax is disabled
-     */
-    event EarlySellTaxDisabled();
-    
-    /**
-     * @dev Emitted when the max transaction limit is disabled
-     */
-    event MaxTxLimitDisabled();
-    
-    /**
-     * @dev Emitted when the max wallet limit is disabled
-     */
-    event MaxWalletLimitDisabled();
-    
-    /**
-     * @dev Emitted when secondary contracts are set
-     * @param infoContract Info contract address
-     */
-    event SecondaryContractsSet(address infoContract);
-    
-    /**
-     * @dev Emitted when token is launched (simplified version with no timestamp)
-     */
-    event Launched();
-    
-    /**
-     * @dev Emitted when an address is excluded from fees (v2 version)
-     * @param account Address that was excluded
-     * @param excluded Whether the address is excluded
-     */
-    event ExcludedFromFee(address indexed account, bool excluded);
-    
-    /**
-     * @dev Emitted when an address is excluded from max wallet limit
-     * @param account Address that was excluded
-     * @param excluded Whether the address is excluded
-     */
-    event ExcludedFromMaxWalletLimit(address indexed account, bool excluded);
-    
-    /**
-     * @dev Emitted when a DEX address status is set (v2 version)
-     * @param dexAddress Address that was updated
-     * @param dexStatus Whether the address is a DEX
-     */
-    event DexStatusChanged(address indexed dexAddress, bool dexStatus);
-    
-    // ================ Owner/Authorized Addresses ================
-    
-    // DOVE token address
-    address private _doveToken;
-    
-    // Initialized flag to prevent re-initialization
-    bool private _initialized;
-    
-    // ================ Initialization ================
-    
-    /**
-     * @dev Constructor
-     * Empty constructor - initialization happens in initialize function
-     */
-    constructor() {}
-    
-    /**
-     * @dev Initialize the contract
-     * @param doveToken DOVE token address
-     * @return True if initialization was successful
-     */
-    function initialize(address doveToken) external returns (bool) {
-        require(!_initialized, "Already initialized");
-        require(doveToken != address(0), "DOVE cannot be zero address");
-        
-        _doveToken = doveToken;
-        _initialized = true;
-        
-        return true;
-    }
-    
-    // ================ Modifiers ================
-    
-    /**
-     * @dev Only allows the DOVE token to call
-     */
-    modifier onlyDOVE() {
-        require(msg.sender == _doveToken, "Only DOVE token can call");
-        _;
-    }
-    
-    // ================ Event Emission Functions ================
-    
-    /**
-     * @dev Emit launch event
-     * @param timestamp Time of launch
-     */
-    function emitLaunch(uint256 timestamp) external onlyDOVE {
-        emit Launch(timestamp);
-    }
-    
-    /**
-     * @dev Emit charity wallet updated event
-     * @param oldWallet Old charity wallet address
-     * @param newWallet New charity wallet address
-     */
-    function emitCharityWalletUpdated(address oldWallet, address newWallet) external onlyDOVE {
-        emit CharityWalletUpdated(oldWallet, newWallet);
-    }
-    
-    /**
-     * @dev Emit fee exclusion updated event
+     * @dev Emitted when an address's fee exemption status is updated
      * @param account Address that was updated
-     * @param excluded Whether the address is excluded
+     * @param exempt Whether the address is exempt from fees
      */
-    function emitExcludedFromFeeUpdated(address account, bool excluded) external onlyDOVE {
-        emit ExcludedFromFeeUpdated(account, excluded);
-    }
+    event FeeExemptionUpdated(address indexed account, bool exempt);
     
     /**
-     * @dev Emit DEX status updated event
-     * @param dexAddress Address that was updated
-     * @param dexStatus Whether the address is a DEX
+     * @dev Emitted when auto-liquidity is added
+     * @param amount Amount of DOVE tokens added to liquidity
      */
-    function emitDexStatusUpdated(address dexAddress, bool dexStatus) external onlyDOVE {
-        emit DexStatusUpdated(dexAddress, dexStatus);
-    }
+    event AutoLiquidityAdded(uint256 amount);
     
     /**
-     * @dev Emit early sell tax disabled event
+     * @dev Emitted when tokens are burned
+     * @param amount Amount of tokens burned
      */
-    function emitEarlySellTaxDisabled() external onlyDOVE {
-        emit EarlySellTaxDisabled();
-    }
+    event TokensBurned(uint256 amount);
     
     /**
-     * @dev Emit max transaction limit disabled event
+     * @dev Emitted when the token is paused
+     * @param pauser Address that paused the token
      */
-    function emitMaxTxLimitDisabled() external onlyDOVE {
-        emit MaxTxLimitDisabled();
-    }
+    event TokenPaused(address indexed pauser);
+    
+    /**
+     * @dev Emitted when the token is unpaused
+     * @param unpauser Address that unpaused the token
+     */
+    event TokenUnpaused(address indexed unpauser);
+    
+    /**
+     * @dev Emitted when tokens are recovered from the contract
+     * @param token Token address that was recovered
+     * @param amount Amount of tokens recovered
+     * @param to Address receiving the recovered tokens
+     */
+    event TokenRecovered(address indexed token, uint256 amount, address indexed to);
 }
