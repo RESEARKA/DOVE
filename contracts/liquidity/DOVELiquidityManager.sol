@@ -43,6 +43,7 @@ contract DOVELiquidityManager is ReentrancyGuard, IERC721Receiver, Pausable {
     using SafeERC20 for IERC20;
     // Uniswap V3 position manager interface
     INonfungiblePositionManager public immutable nonfungiblePositionManager;
+    IUniswapV3Factory public immutable uniFactory;
     
     // Token addresses
     address public immutable doveToken;
@@ -178,6 +179,7 @@ contract DOVELiquidityManager is ReentrancyGuard, IERC721Receiver, Pausable {
         if (_feeManager == address(0)) revert ZeroAddressError("FeeManager");
         
         nonfungiblePositionManager = INonfungiblePositionManager(_positionManager);
+        uniFactory = IUniswapV3Factory(nonfungiblePositionManager.factory());
         doveToken = _doveToken;
         weth = _weth;
         usdc = _usdc;
@@ -938,4 +940,34 @@ contract DOVELiquidityManager is ReentrancyGuard, IERC721Receiver, Pausable {
      */
     receive() external payable {}
     
+    /**
+     * @notice Checks whether `pool` is a legitimate Uniswap V3 pool used by this protocol
+     * @dev Never reverts. Returns false on any unexpected behavior.
+     */
+    function isDexPair(address pool) external view returns (bool) {
+        if (pool == address(0)) return false;
+        uint256 size;
+        assembly { size := extcodesize(pool) }
+        if (size == 0) return false;
+
+        address factory;
+        try IUniswapV3Pool(pool).factory() returns (address f) { factory = f; } catch { return false; }
+        if (factory != uniFactory) return false;
+
+        address token0;
+        address token1;
+        uint24 fee;
+        try IUniswapV3Pool(pool).token0() returns (address t0) { token0 = t0; } catch { return false; }
+        try IUniswapV3Pool(pool).token1() returns (address t1) { token1 = t1; } catch { return false; }
+        try IUniswapV3Pool(pool).fee() returns (uint24 f) { fee = f; } catch { return false; }
+
+        if (fee != FEE_TIER) return false;
+        bool supported = (token0 == doveToken && (token1 == weth || token1 == usdc)) ||
+                         (token1 == doveToken && (token0 == weth || token0 == usdc));
+        if (!supported) return false;
+
+        address registered = IUniswapV3Factory(factory).getPool(token0, token1, fee);
+        if (registered != pool) return false;
+        return true;
+    }
 }

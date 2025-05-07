@@ -3,18 +3,19 @@ pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "../errors/DOVEErrors.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "../interfaces/IDOVE.sol";
 import "../interfaces/IDOVEInfo.sol";
-import "../token/DOVEEvents.sol";
 import "../liquidity/DOVELiquidityManager.sol";
+import "../errors/DOVEErrors.sol";
+import "../token/DOVEEvents.sol";
 
 /**
  * @title DOVEv3
  * @dev ERC20 token with tapering early-sell tax and auto-LP mechanics using Uniswap V3
+ * Sell tax applies only to sell transactions (transfers to liquidity pairs)
+ * Features automatic liquidity provision and charity donations
  */
 contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
     using SafeERC20 for IERC20;
@@ -205,15 +206,24 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
     // ========== INTERNAL FUNCTIONS ==========
     
     /**
-     * @dev Internal transfer function that applies fees
+     * @dev Internal transfer function that applies fees on sells only
      * @param sender Address sending the tokens
      * @param recipient Address receiving the tokens
      * @param amount Amount to transfer
      * @return Whether the transfer was successful
      */
-    function _customTransfer(address sender, address recipient, uint256 amount) internal whenNotPaused nonReentrant returns (bool) {
+    function _customTransfer(address sender, address recipient, uint256 amount) internal whenNotPaused returns (bool) {
         // Skip fee processing if either address is exempt
         if (isExemptFromFees[sender] || isExemptFromFees[recipient]) {
+            _transfer(sender, recipient, amount);
+            return true;
+        }
+        
+        // Check if this is a sell transaction (transfer to liquidity pair)
+        bool isSellTransaction = _isSellTransaction(recipient);
+        
+        // If not a sell transaction, process normal transfer without fees
+        if (!isSellTransaction) {
             _transfer(sender, recipient, amount);
             return true;
         }
@@ -257,21 +267,30 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
      * @dev Process auto-LP functionality
      * @param amount Amount of DOVE tokens to use for liquidity
      */
-    function _processAutoLP(uint256 amount) internal {
+    function _processAutoLP(uint256 amount) internal nonReentrant {
         // Split amount - 50% for liquidity, 50% for burning
         uint256 amountForLP = amount / 2;
         uint256 amountForBurning = amount - amountForLP;
         
-        // Approve tokens for liquidity manager
+        // First, reset any existing allowance to prevent allowance exploits
+        _approve(address(this), address(liquidityManager), 0);
+        
+        // Then approve tokens for liquidity manager
         _approve(address(this), address(liquidityManager), amountForLP);
         
         // Try to add liquidity using current pair
         try liquidityManager.addLiquidityFromToken(amountForLP) {
             // Emit success event
             emit AutoLiquidityAdded(amountForLP);
-        } catch {
+        } catch (bytes memory reason) {
             // If adding liquidity fails, just burn all tokens
             amountForBurning = amount;
+            
+            // Reset allowance to zero to prevent any future token leakage
+            _approve(address(this), address(liquidityManager), 0);
+            
+            // Emit failure event with reason if available
+            emit AutoLiquidityFailed(amountForLP, reason.length > 0);
         }
         
         // Burn tokens
@@ -287,4 +306,37 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
     function _update(address from, address to, uint256 value) internal override whenNotPaused {
         super._update(from, to, value);
     }
+    
+    /**
+     * @dev Determine if a transaction is a sell (sending to a liquidity pair)
+     * @param recipient Address receiving the tokens
+     * @return Whether the transaction is a sell
+     */
+    /**
+     * @dev Determines if a transaction is a sell (transfer to a liquidity pool)
+     * @param recipient Address receiving the tokens
+     * @return Whether the transaction is a sell
+     */
+    function _isSellTransaction(address recipient) internal view returns (bool) {
+        // In a complete implementation, this would maintain a mapping of all DEX pairs
+        // For simplicity, we check if the recipient is a known liquidity-related address
+        
+        // If DEX pair addresses are available, use them directly
+        try liquidityManager.isDexPair(recipient) returns (bool isPair) {
+            if (isPair) return true;
+        } catch {
+            // Fallback if the contract doesn't support this function
+        }
+        
+        // If no specific check exists, use a simplified approach:
+        // Consider it a sell if sending to the liquidity manager
+        return address(liquidityManager) == recipient;
+    }
+    
+    /**
+     * @dev Emitted when auto-LP process fails
+     * @param amount Amount that was intended for liquidity
+     * @param hasErrorData Whether error data was captured
+     */
+
 }

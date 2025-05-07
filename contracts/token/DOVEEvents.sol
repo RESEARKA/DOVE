@@ -66,4 +66,11 @@ interface DOVEEvents {
      * @param to Address receiving the recovered tokens
      */
     event TokenRecovered(address indexed token, uint256 amount, address indexed to);
+    
+    /**
+     * @dev Emitted when auto-liquidity process fails
+     * @param amount Amount that was intended for liquidity
+     * @param hasErrorData Whether error data was captured
+     */
+    event AutoLiquidityFailed(uint256 amount, bool hasErrorData);
 }
