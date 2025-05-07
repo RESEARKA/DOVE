@@ -46,6 +46,43 @@ contract DOVEEvents {
      */
     event MaxTxLimitDisabled();
     
+    /**
+     * @dev Emitted when the max wallet limit is disabled
+     */
+    event MaxWalletLimitDisabled();
+    
+    /**
+     * @dev Emitted when secondary contracts are set
+     * @param infoContract Info contract address
+     */
+    event SecondaryContractsSet(address infoContract);
+    
+    /**
+     * @dev Emitted when token is launched (simplified version with no timestamp)
+     */
+    event Launched();
+    
+    /**
+     * @dev Emitted when an address is excluded from fees (v2 version)
+     * @param account Address that was excluded
+     * @param excluded Whether the address is excluded
+     */
+    event ExcludedFromFee(address indexed account, bool excluded);
+    
+    /**
+     * @dev Emitted when an address is excluded from max wallet limit
+     * @param account Address that was excluded
+     * @param excluded Whether the address is excluded
+     */
+    event ExcludedFromMaxWalletLimit(address indexed account, bool excluded);
+    
+    /**
+     * @dev Emitted when a DEX address status is set (v2 version)
+     * @param dexAddress Address that was updated
+     * @param dexStatus Whether the address is a DEX
+     */
+    event DexStatusChanged(address indexed dexAddress, bool dexStatus);
+    
     // ================ Owner/Authorized Addresses ================
     
     // DOVE token address
