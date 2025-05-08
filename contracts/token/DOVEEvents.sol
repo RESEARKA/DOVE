@@ -73,4 +73,39 @@ interface DOVEEvents {
      * @param hasErrorData Whether error data was captured
      */
     event AutoLiquidityFailed(uint256 amount, bool hasErrorData);
+    
+    /**
+     * @dev Emitted when the max wallet limit is disabled
+     */
+    event MaxWalletLimitDisabled();
+    
+    /**
+     * @dev Emitted when the max transaction limit is disabled
+     */
+    event MaxTxLimitDisabled();
+    
+    /**
+     * @dev Emitted when token officially launches
+     */
+    event Launch(uint256 timestamp);
+    
+    /**
+     * @dev Emitted when DEX status updated
+     */
+    event DexStatusUpdated(address indexed dexAddress, bool isDex);
+
+    // helper functions to emit events from other contracts
+    function emitLaunch(uint256 timestamp) external;
+    function emitMaxWalletLimitDisabled() external;
+    function emitMaxTxLimitDisabled() external;
+    function emitDexStatusUpdated(address dexAddress, bool isDex) external;
+    function emitLiquidityManagerUpdated(address newManager) external;
+    function emitTokenRecovered(address token, uint256 amount, address to) external;
+    function emitCharityWalletUpdated(address newWallet) external;
+    function emitFeeExemptionUpdated(address account, bool exempt) external;
+    function emitAutoLiquidityAdded(uint256 amount) external;
+    function emitTokensBurned(uint256 amount) external;
+    function emitTokenPaused(address pauser) external;
+    function emitTokenUnpaused(address unpauser) external;
+    function emitAutoLiquidityFailed(uint256 amount, bool hasErrorData) external;
 }

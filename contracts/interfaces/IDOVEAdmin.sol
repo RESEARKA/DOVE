@@ -58,13 +58,12 @@ interface IDOVEAdmin is IAccessControl {
      * @param eventsContract Address of events contract
      * @param governanceContract Address of governance contract
      * @param infoContract Address of info contract
-     * @return True if initialization was successful
      */
     function initialiseTokenContracts(
         address eventsContract,
         address governanceContract,
         address infoContract
-    ) external returns (bool);
+    ) external;
     
     /**
      * @dev Disable the max transaction limit

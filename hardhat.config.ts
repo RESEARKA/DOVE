@@ -39,11 +39,11 @@ const config: HardhatUserConfig = {
       }
     ],
     overrides: {
-      "node_modules/@uniswap/v3-core/contracts/**/*.sol": {
+      "./node_modules/@uniswap/v3-core/contracts/**/*.sol": {
         version: "0.7.6",
         settings: { optimizer: { enabled: true, runs: 200 } }
       },
-      "node_modules/@uniswap/v3-periphery/contracts/**/*.sol": {
+      "./node_modules/@uniswap/v3-periphery/contracts/**/*.sol": {
         version: "0.7.6",
         settings: { optimizer: { enabled: true, runs: 200 } }
       }

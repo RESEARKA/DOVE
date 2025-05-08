@@ -240,13 +240,12 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
      * @param eventsContract Address of the events contract
      * @param governanceContract Address of the governance contract
      * @param infoContract Address of the info contract
-     * @return True if initialization is successful
      */
     function initialiseTokenContracts(
         address eventsContract,
         address governanceContract,
         address infoContract
-    ) external nonReentrant returns (bool) {
+    ) external nonReentrant {
         // First ensure token is registered
         require(address(_doveToken) != address(0), "Token address not set");
         
@@ -258,7 +257,7 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
             require(msg.sender == address(_doveToken), "Only token or admin can initialize");
         }
         
-        return _doveToken.setSecondaryContracts(
+        _doveToken.setSecondaryContracts(
             eventsContract,
             governanceContract,
             infoContract

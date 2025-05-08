@@ -219,7 +219,7 @@ contract DOVELiquidityManager is ReentrancyGuard, IERC721Receiver, Pausable {
     function addLiquidityDoveWeth(
         uint256 doveAmount,
         uint256 wethAmount
-    ) external onlyFeeManager nonReentrant whenNotPaused returns (uint128 liquidity) {
+    ) public onlyFeeManager nonReentrant whenNotPaused returns (uint128 liquidity) {
         // Skip if zero amounts
         if (doveAmount == 0 || wethAmount == 0) {
             return 0;
@@ -262,7 +262,7 @@ contract DOVELiquidityManager is ReentrancyGuard, IERC721Receiver, Pausable {
     function addLiquidityDoveUsdc(
         uint256 doveAmount,
         uint256 usdcAmount
-    ) external onlyFeeManager nonReentrant whenNotPaused returns (uint128 liquidity) {
+    ) public onlyFeeManager nonReentrant whenNotPaused returns (uint128 liquidity) {
         // Skip if zero amounts
         if (doveAmount == 0 || usdcAmount == 0) {
             return 0;

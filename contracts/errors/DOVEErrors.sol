@@ -27,6 +27,10 @@ library DOVEErrors {
     error PositionNotOwned();
     error MaxFeeExceeded();
     
+    // DOVEv2 specific errors
+    error TransferExceedsMaxAmount();
+    error TransferExceedsMaxWalletLimit();
+    
     // Transfer related errors
     error TransferFromZeroAddress();
     error TransferToZeroAddress();

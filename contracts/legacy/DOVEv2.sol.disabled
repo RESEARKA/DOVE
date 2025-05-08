@@ -30,9 +30,8 @@ contract DOVEv2 is ERC20, AccessControl, Pausable, ReentrancyGuard {
     event CharityWalletUpdated(address indexed oldWallet, address indexed newWallet);
     event EarlySellTaxDisabled();
     
-    // ================ Errors ================
-    
-    // Using errors from DOVEErrors.sol
+    // Using centralized custom errors from DOVEErrors.sol
+    // ZeroAddress, TransferExceedsMaxAmount, TransferExceedsMaxWalletLimit declared in DOVEErrors
     
     // ================ Constants ================
     
@@ -87,10 +86,10 @@ contract DOVEv2 is ERC20, AccessControl, Pausable, ReentrancyGuard {
      */
     constructor(address adminContract, address charityWallet) ERC20("DOVE", "DOVE") {
         if (adminContract == address(0)) {
-            revert ZeroAddress();
+            revert DOVEErrors.ZeroAddress();
         }
         if (charityWallet == address(0)) {
-            revert ZeroAddress();
+            revert DOVEErrors.ZeroAddress();
         }
         
         // Set admin contract
@@ -433,10 +432,10 @@ contract DOVEv2 is ERC20, AccessControl, Pausable, ReentrancyGuard {
         uint256 amount
     ) internal override whenNotPaused {
         if (sender == address(0)) {
-            revert ZeroAddress();
+            revert DOVEErrors.ZeroAddress();
         }
         if (recipient == address(0)) {
-            revert ZeroAddress();
+            revert DOVEErrors.ZeroAddress();
         }
         
         // Use local max transaction amount
@@ -454,7 +453,7 @@ contract DOVEv2 is ERC20, AccessControl, Pausable, ReentrancyGuard {
         bool maxTxEnabled = _isMaxTxLimitEnabled;
         
         if (maxTxEnabled && amount > maxAmount) {
-            revert TransferExceedsMaxAmount();
+            revert DOVEErrors.TransferExceedsMaxAmount();
         }
         
         // Enforce max wallet limit if enabled
@@ -475,7 +474,7 @@ contract DOVEv2 is ERC20, AccessControl, Pausable, ReentrancyGuard {
                 
                 // Check that recipient's new balance won't exceed max wallet limit
                 if (recipientBalance + amount > maxWalletAmount) {
-                    revert TransferExceedsMaxWalletLimit();
+                    revert DOVEErrors.TransferExceedsMaxWalletLimit();
                 }
             }
         }

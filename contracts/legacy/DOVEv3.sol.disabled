@@ -9,6 +9,7 @@ import "../interfaces/IDOVE.sol";
 import "../interfaces/IDOVEInfo.sol";
 import "../liquidity/DOVELiquidityManager.sol";
 import "../errors/DOVEErrors.sol";
+import "../token/DOVE.sol";
 import "../token/DOVEEvents.sol";
 
 /**
@@ -17,7 +18,7 @@ import "../token/DOVEEvents.sol";
  * Sell tax applies only to sell transactions (transfers to liquidity pairs)
  * Features automatic liquidity provision and charity donations
  */
-contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
+contract DOVEv3 is DOVE, IDOVEInfo, DOVEEvents {
     using SafeERC20 for IERC20;
 
     // ========== STATE VARIABLES ==========
@@ -37,7 +38,7 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
     uint256 public immutable launchTimestamp;
     
     // Liquidity manager contract
-    DOVELiquidityManager public liquidityManager;
+    DOVELiquidityManager private _liquidityManagerInstance;
     
     // Address to receive charity fees
     address public charityWallet;
@@ -55,12 +56,12 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
     constructor(
         address _charityWallet,
         address _liquidityManager
-    ) ERC20("DOVE", "DOVE") Ownable(msg.sender) {
+    ) DOVE(msg.sender, _charityWallet, msg.sender) {
         require(_charityWallet != address(0), "Zero charity wallet");
         require(_liquidityManager != address(0), "Zero liquidity manager");
         
         charityWallet = _charityWallet;
-        liquidityManager = DOVELiquidityManager(_liquidityManager);
+        _liquidityManagerInstance = DOVELiquidityManager(_liquidityManager);
         
         // Record launch timestamp
         launchTimestamp = block.timestamp;
@@ -88,6 +89,14 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
     
     // ========== VIEW FUNCTIONS ==========
     
+    /**
+     * @dev Returns the address of the liquidity manager contract.
+     * This satisfies the IDOVEInfo interface requirement.
+     */
+    function liquidityManager() public view override(IDOVEInfo) returns (address) {
+        return address(_liquidityManagerInstance);
+    }
+
     /**
      * @dev Calculate the current sell tax based on time since launch
      * @return Current sell tax in basis points
@@ -117,29 +126,37 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
         }
     }
     
+    /**
+     * @dev Returns true if token transfers are paused
+     * @return Whether the token is paused
+     */
+    function paused() public view override returns (bool) {
+        return super.paused();
+    }
+    
     // ========== PUBLIC FUNCTIONS ==========
     
     /**
-     * @dev Overridden transfer function that applies fees on sell transfers
-     * @param recipient Address receiving the tokens
-     * @param amount Amount to transfer
-     * @return Whether the transfer was successful
+     * @dev A boolean indicating whether the operation succeeded.
+     * @notice Overrides ERC20 standard transfer with custom logic for fees and taxes.
      */
-    function transfer(address recipient, uint256 amount) public override(ERC20, IERC20) returns (bool) {
-        return _customTransfer(msg.sender, recipient, amount);
+    function transfer(address recipient, uint256 amount) public override returns (bool) {
+        address owner = _msgSender();
+        _beforeTokenTransfer(owner, recipient, amount); // Includes fee logic
+        super.transfer(recipient, amount);
+        return true;
     }
     
     /**
-     * @dev Overridden transferFrom function that applies fees on sell transfers
-     * @param sender Address sending the tokens
-     * @param recipient Address receiving the tokens
-     * @param amount Amount to transfer
-     * @return Whether the transfer was successful
+     * @dev A boolean indicating whether the operation succeeded.
+     * @notice Overrides ERC20 standard transferFrom with custom logic for fees and taxes.
      */
-    function transferFrom(address sender, address recipient, uint256 amount) public override(ERC20, IERC20) returns (bool) {
-        address spender = msg.sender;
+    function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
+        address spender = _msgSender();
         _spendAllowance(sender, spender, amount);
-        return _customTransfer(sender, recipient, amount);
+        _beforeTokenTransfer(sender, recipient, amount); // Includes fee logic
+        super.transferFrom(sender, recipient, amount);
+        return true;
     }
     
     // ========== OWNER FUNCTIONS ==========
@@ -148,7 +165,7 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
      * @dev Set a new charity wallet address
      * @param _charityWallet New charity wallet address
      */
-    function setCharityWallet(address _charityWallet) external onlyOwner validAddress(_charityWallet) {
+    function setCharityWallet(address _charityWallet) external override onlyOwner validAddress(_charityWallet) {
         charityWallet = _charityWallet;
         emit CharityWalletUpdated(_charityWallet);
     }
@@ -157,8 +174,8 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
      * @dev Set a new liquidity manager
      * @param _liquidityManager New liquidity manager address
      */
-    function setLiquidityManager(address _liquidityManager) external onlyOwner validAddress(_liquidityManager) {
-        liquidityManager = DOVELiquidityManager(_liquidityManager);
+    function setLiquidityManager(address _liquidityManager) external override onlyOwner validAddress(_liquidityManager) {
+        _liquidityManagerInstance = DOVELiquidityManager(_liquidityManager);
         isExemptFromFees[_liquidityManager] = true;
         emit LiquidityManagerUpdated(_liquidityManager);
     }
@@ -168,7 +185,7 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
      * @param account Address to set exemption for
      * @param exempt Whether the address should be exempt from fees
      */
-    function setFeeExemption(address account, bool exempt) external onlyOwner validAddress(account) {
+    function setFeeExemption(address account, bool exempt) external override onlyOwner validAddress(account) {
         isExemptFromFees[account] = exempt;
         emit FeeExemptionUpdated(account, exempt);
     }
@@ -176,7 +193,7 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
     /**
      * @dev Pause token transfers
      */
-    function pause() external onlyOwner {
+    function pause() external override onlyOwner {
         _pause();
         emit TokenPaused(msg.sender);
     }
@@ -184,7 +201,7 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
     /**
      * @dev Unpause token transfers
      */
-    function unpause() external onlyOwner {
+    function unpause() external override onlyOwner {
         _unpause();
         emit TokenUnpaused(msg.sender);
     }
@@ -195,7 +212,7 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
      * @param amount Amount to recover
      * @param to Address to send recovered tokens to
      */
-    function recoverToken(address token, uint256 amount, address to) external onlyOwner validAddress(to) {
+    function recoverToken(address token, uint256 amount, address to) external override onlyOwner validAddress(to) {
         // Prevent draining token if recovery is attempted on the DOVE token itself
         if (token == address(this)) revert DOVEErrors.CannotRecoverDOVE();
         
@@ -273,13 +290,13 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
         uint256 amountForBurning = amount - amountForLP;
         
         // First, reset any existing allowance to prevent allowance exploits
-        _approve(address(this), address(liquidityManager), 0);
+        _approve(address(this), address(_liquidityManagerInstance), 0);
         
         // Then approve tokens for liquidity manager
-        _approve(address(this), address(liquidityManager), amountForLP);
+        _approve(address(this), address(_liquidityManagerInstance), amountForLP);
         
         // Try to add liquidity using current pair
-        try liquidityManager.addLiquidityFromToken(amountForLP) {
+        try _liquidityManagerInstance.addLiquidityFromToken(amountForLP) {
             // Emit success event
             emit AutoLiquidityAdded(amountForLP);
         } catch (bytes memory reason) {
@@ -287,7 +304,7 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
             amountForBurning = amount;
             
             // Reset allowance to zero to prevent any future token leakage
-            _approve(address(this), address(liquidityManager), 0);
+            _approve(address(this), address(_liquidityManagerInstance), 0);
             
             // Emit failure event with reason if available
             emit AutoLiquidityFailed(amountForLP, reason.length > 0);
@@ -298,13 +315,6 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
             _burn(address(this), amountForBurning);
             emit TokensBurned(amountForBurning);
         }
-    }
-    
-    /**
-     * @dev Override ERC20 _update (transfer) to include pausable functionality
-     */
-    function _update(address from, address to, uint256 value) internal override whenNotPaused {
-        super._update(from, to, value);
     }
     
     /**
@@ -322,7 +332,7 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
         // For simplicity, we check if the recipient is a known liquidity-related address
         
         // If DEX pair addresses are available, use them directly
-        try liquidityManager.isDexPair(recipient) returns (bool isPair) {
+        try _liquidityManagerInstance.isDexPair(recipient) returns (bool isPair) {
             if (isPair) return true;
         } catch {
             // Fallback if the contract doesn't support this function
@@ -330,7 +340,7 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
         
         // If no specific check exists, use a simplified approach:
         // Consider it a sell if sending to the liquidity manager
-        return address(liquidityManager) == recipient;
+        return address(_liquidityManagerInstance) == recipient;
     }
     
     /**
@@ -339,4 +349,13 @@ contract DOVEv3 is ERC20, Ownable, Pausable, ReentrancyGuard, IDOVE, IDOVEInfo {
      * @param hasErrorData Whether error data was captured
      */
 
+    // ========== DOVEEvents helper implementations ==========
+
+    function emitLaunch(uint256 timestamp) external override {
+        emit Launch(timestamp);
+    }
+
+    function emitMaxWalletLimitDisabled() external override {
+        emit MaxWalletLimitDisabled();
+    }
 }

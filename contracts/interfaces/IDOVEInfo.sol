@@ -14,6 +14,12 @@ interface IDOVEInfo {
     function charityWallet() external view returns (address);
     
     /**
+     * @dev Get the charity wallet address
+     * @return Address of the charity wallet
+     */
+    function getCharityWallet() external view returns (address);
+    
+    /**
      * @dev Get the liquidity manager contract address
      * @return Address of the liquidity manager
      */
@@ -37,4 +43,36 @@ interface IDOVEInfo {
      * @return Whether the address is exempt from fees
      */
     function isExemptFromFees(address account) external view returns (bool);
+    
+    /**
+     * @dev Check if an address is excluded from fees
+     * @param account Address to check
+     * @return Whether the address is excluded from fees
+     */
+    function isExcludedFromFee(address account) external view returns (bool);
+    
+    /**
+     * @dev Get DEX status for an address
+     * @param account Address to check
+     * @return Whether the address is a DEX
+     */
+    function getDexStatus(address account) external view returns (bool);
+    
+    /**
+     * @dev Get the admin contract address
+     * @return Address of the admin contract
+     */
+    function getAdminContract() external view returns (address);
+    
+    /**
+     * @dev Get admin update proposal details
+     * @param proposalId ID of the proposal
+     * @return Details of the proposal
+     */
+    function getAdminUpdateProposal(uint256 proposalId) external view returns (address,uint256,uint256,bool);
+    
+    /**
+     * @dev Get the current max transaction amount
+     */
+    function getMaxTransactionAmount() external view returns (uint256);
 }

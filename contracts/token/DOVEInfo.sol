@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import "../interfaces/IDOVEInfo.sol";
 import "../interfaces/IDOVEGovernance.sol";
 import "./DOVEFees.sol";
 
@@ -10,7 +9,7 @@ import "./DOVEFees.sol";
  * @dev View functions for the DOVE token ecosystem
  * Provides read-only access to token information and configuration
  */
-contract DOVEInfo is IDOVEInfo {
+contract DOVEInfo {
     // ================ Constants ================
     
     // Charity fee: 0.5% (50 basis points)
@@ -92,7 +91,7 @@ contract DOVEInfo is IDOVEInfo {
      * @dev Update max transaction limit status
      * @param isEnabled Whether the limit is enabled
      */
-    function setMaxTxLimitEnabled(bool isEnabled) external override onlyDOVE {
+    function setMaxTxLimitEnabled(bool isEnabled) external onlyDOVE {
         _isMaxTxLimitEnabled = isEnabled;
     }
     
@@ -100,7 +99,7 @@ contract DOVEInfo is IDOVEInfo {
      * @dev Update max wallet limit status
      * @param isEnabled Whether the limit is enabled
      */
-    function setMaxWalletLimitEnabled(bool isEnabled) external override onlyDOVE {
+    function setMaxWalletLimitEnabled(bool isEnabled) external onlyDOVE {
         _isMaxWalletLimitEnabled = isEnabled;
     }
     
@@ -110,7 +109,7 @@ contract DOVEInfo is IDOVEInfo {
      * @dev Get the charity wallet address
      * @return Address of the charity wallet
      */
-    function getCharityWallet() external view override returns (address) {
+    function getCharityWallet() external view returns (address) {
         return _feeManager.getCharityWallet();
     }
     
@@ -118,7 +117,7 @@ contract DOVEInfo is IDOVEInfo {
      * @dev Get the charity fee percentage in basis points
      * @return Charity fee in basis points
      */
-    function getCharityFee() external pure override returns (uint16) {
+    function getCharityFee() external pure returns (uint16) {
         return CHARITY_FEE_BP;
     }
     
@@ -127,7 +126,7 @@ contract DOVEInfo is IDOVEInfo {
      * @param account Address to check
      * @return Whether the address is excluded from fees
      */
-    function isExcludedFromFee(address account) external view override returns (bool) {
+    function isExcludedFromFee(address account) external view returns (bool) {
         return _feeManager.isExcludedFromFee(account);
     }
     
@@ -136,7 +135,7 @@ contract DOVEInfo is IDOVEInfo {
      * @param account Address to check
      * @return Whether the address is a DEX
      */
-    function getDexStatus(address account) external view override returns (bool) {
+    function getDexStatus(address account) external view returns (bool) {
         return _feeManager.getDexStatus(account);
     }
     
@@ -144,7 +143,7 @@ contract DOVEInfo is IDOVEInfo {
      * @dev Get the maximum transaction amount
      * @return Maximum transaction amount
      */
-    function getMaxTransactionAmount() external view override returns (uint256) {
+    function getMaxTransactionAmount() external view returns (uint256) {
         return _isMaxTxLimitEnabled ? _maxTransactionAmount : type(uint256).max;
     }
     
@@ -152,7 +151,7 @@ contract DOVEInfo is IDOVEInfo {
      * @dev Get the admin contract address
      * @return Address of the admin contract
      */
-    function getAdminContract() external view override returns (address) {
+    function getAdminContract() external view returns (address) {
         return _governanceContract.getAdminContract();
     }
     
@@ -164,7 +163,7 @@ contract DOVEInfo is IDOVEInfo {
      * @return approvalCount Number of approvals
      * @return executed Whether proposal has been executed
      */
-    function getAdminUpdateProposal(uint256 proposalId) external view override returns (
+    function getAdminUpdateProposal(uint256 proposalId) external view returns (
         address newAdmin,
         uint256 timestamp,
         uint256 approvalCount,
