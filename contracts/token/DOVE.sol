@@ -584,7 +584,7 @@ contract DOVE is ERC20, Pausable, ReentrancyGuard, IDOVE, Ownable {
     }
     
     /// @notice Exposes current paused state to external callers (IDOVE & Pausable override)
-    function paused() external view override(IDOVE, Pausable) returns (bool) {
+    function paused() public view override(IDOVE, Pausable) returns (bool) {
         return super.paused();
     }
     

@@ -22,4 +22,20 @@ module.exports = {
     node: true,
     mocha: true,
   },
+  ignorePatterns: ['OLD-Failed-version/**'],
+  overrides: [
+    {
+      files: ['test/**/*.ts'],
+      parserOptions: {
+        project: null,
+      },
+      rules: {
+        '@typescript-eslint/no-explicit-any': ['warn'],
+        '@typescript-eslint/no-unused-vars': [
+          'warn',
+          { argsIgnorePattern: '^_' },
+        ],
+      },
+    },
+  ],
 }

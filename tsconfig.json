@@ -11,6 +11,7 @@
     "declaration": true,
     "rootDir": "."
   },
-  "include": ["scripts/**/*", "test/**/*", "typechain-types/**/*"],
+  "include": ["scripts/**/*", "typechain-types/**/*"],
+  "exclude": ["test/**/*", "OLD-Failed-version/**/*"],
   "files": ["hardhat.config.ts"]
 }
