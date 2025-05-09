@@ -86,7 +86,7 @@ contract DOVEFees is ReentrancyGuard {
         address sender,
         address recipient,
         uint256 amount
-    ) external onlyDOVE returns (uint256 netAmount) {
+    ) external onlyDOVE nonReentrant returns (uint256 netAmount) {
         // Skip fees for excluded addresses and always fee exempt addresses
         if (_isExcludedFromFee[sender] || _isExcludedFromFee[recipient] ||
             IDOVE(_doveToken).isAlwaysFeeExempt(sender) || IDOVE(_doveToken).isAlwaysFeeExempt(recipient)) {
@@ -97,34 +97,24 @@ contract DOVEFees is ReentrancyGuard {
         netAmount = amount;
         
         // Apply charity fee (applies to all non-excluded transfers)
-        // Cache fee calculation result for gas optimization
+        // Cache fee calculation result for gas optimization and enforce a minimum fee of 1 token unit
         uint256 charityFeeAmount = FeeLibrary.calculateCharityFee(amount);
+        if (charityFeeAmount == 0 && amount > 0) {
+            charityFeeAmount = 1;
+        }
         
         // Only process if there's an actual fee and charity wallet is set
         if (charityFeeAmount > 0 && _charityWallet != address(0)) {
             // CHECKS-EFFECTS: Reduce the net amount by the fee
-            unchecked {
-                netAmount = netAmount - charityFeeAmount;
-            }
+            netAmount -= charityFeeAmount;
             
-            // Instead of calling the transferFeeFromContract directly, which can cause reentrancy,
-            // set the values for direct transfer
+            // INTERACTIONS: safe transfer fee portion to charity wallet using dedicated helper (no re-entry risk now)
             if (_charityWallet != address(0)) {
-                // INTERACTIONS: Transfer fee to charity wallet - call super._transfer to avoid reprocessing fees
-                try IDOVE(_doveToken).transferFeeFromContract(sender, _charityWallet, charityFeeAmount) returns (bool success) {
-                    if (success) {
-                        emit CharityFeeTaken(sender, recipient, charityFeeAmount);
-                    } else {
-                        // If fee transfer fails, add it back to net amount
-                        unchecked {
-                            netAmount = netAmount + charityFeeAmount;
-                        }
-                    }
-                } catch {
-                    // If the transfer call fails completely, add the fee back to net amount
-                    unchecked {
-                        netAmount = netAmount + charityFeeAmount;
-                    }
+                bool ok = IDOVE(_doveToken).transferFeeFromContract(sender, _charityWallet, charityFeeAmount);
+                if (ok) {
+                    emit CharityFeeTaken(sender, recipient, charityFeeAmount);
+                } else {
+                    netAmount += charityFeeAmount;
                 }
             }
         }
@@ -141,9 +131,7 @@ contract DOVEFees is ReentrancyGuard {
             
             if (sellTaxAmount > 0) {
                 // CHECKS-EFFECTS: Reduce the net amount by the tax
-                unchecked {
-                    netAmount = netAmount - sellTaxAmount;
-                }
+                netAmount -= sellTaxAmount;
                 
                 // INTERACTIONS: Burn the tax amount (sent to dead address)
                 bool success = IDOVE(_doveToken).burnFeeFromContract(sender, sellTaxAmount);
@@ -151,9 +139,7 @@ contract DOVEFees is ReentrancyGuard {
                     emit EarlySellTaxTaken(sender, recipient, sellTaxAmount);
                 } else {
                     // If burn fails, add it back to net amount
-                    unchecked {
-                        netAmount = netAmount + sellTaxAmount;
-                    }
+                    netAmount += sellTaxAmount;
                 }
             }
         }
