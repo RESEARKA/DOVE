@@ -95,17 +95,58 @@ interface DOVEEvents {
     event DexStatusUpdated(address indexed dexAddress, bool isDex);
 
     // helper functions to emit events from other contracts
+    /// @notice Emits the {Launch} event.
+    /// @param timestamp Block timestamp of launch.
     function emitLaunch(uint256 timestamp) external;
+    
+    /// @notice Emits the {MaxWalletLimitDisabled} event.
     function emitMaxWalletLimitDisabled() external;
+    
+    /// @notice Emits the {MaxTxLimitDisabled} event.
     function emitMaxTxLimitDisabled() external;
+    
+    /// @notice Emits the {DexStatusUpdated} event.
+    /// @param dexAddress Address flagged/unflagged as dex.
+    /// @param isDex True if flagged as DEX
     function emitDexStatusUpdated(address dexAddress, bool isDex) external;
+    
+    /// @notice Emits the {LiquidityManagerUpdated} event.
+    /// @param newManager New liquidity manager address.
     function emitLiquidityManagerUpdated(address newManager) external;
+    
+    /// @notice Emits the {TokenRecovered} event.
+    /// @param token Token address.
+    /// @param amount Amount recovered.
+    /// @param to Receiver address.
     function emitTokenRecovered(address token, uint256 amount, address to) external;
+    
+    /// @notice Emits the {CharityWalletUpdated} event.
+    /// @param newWallet New charity wallet.
     function emitCharityWalletUpdated(address newWallet) external;
+    
+    /// @notice Emits the {FeeExemptionUpdated} event.
+    /// @param account Address updated.
+    /// @param exempt True if now exempt.
     function emitFeeExemptionUpdated(address account, bool exempt) external;
+    
+    /// @notice Emits the {AutoLiquidityAdded} event.
+    /// @param amount Amount of tokens.
     function emitAutoLiquidityAdded(uint256 amount) external;
+    
+    /// @notice Emits the {TokensBurned} event.
+    /// @param amount Amount burned.
     function emitTokensBurned(uint256 amount) external;
+    
+    /// @notice Emits the {TokenPaused} event.
+    /// @param pauser Address that paused.
     function emitTokenPaused(address pauser) external;
+    
+    /// @notice Emits the {TokenUnpaused} event.
+    /// @param unpauser Address that unpaused.
     function emitTokenUnpaused(address unpauser) external;
+    
+    /// @notice Emits the {AutoLiquidityFailed} event.
+    /// @param amount Intended liquidity amount.
+    /// @param hasErrorData True if error data was returned.
     function emitAutoLiquidityFailed(uint256 amount, bool hasErrorData) external;
 }

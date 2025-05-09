@@ -575,14 +575,17 @@ contract DOVE is ERC20, Pausable, ReentrancyGuard, IDOVE, Ownable {
         return _infoContract.getAdminUpdateProposal(proposalId);
     }
     
-    /**
-     * @dev Check if an address is always fee exempt
-     * @param account Address to check
-     * @return Whether the address is always fee exempt
-     */
-    function isAlwaysFeeExempt(address account) public view override(IDOVE) returns (bool) {
+    /// @notice Returns true if an account is permanently fee-exempt (dead address, charity, etc.)
+    /// @param account Address to query
+    /// @return True if the address is always exempt from fees
+    function isAlwaysFeeExempt(address account) external view override(IDOVE) returns (bool) {
         // Check dedicated exempt mapping, always exempt the token contract itself
         return _alwaysFeeExempt[account] || account == address(this);
+    }
+    
+    /// @notice Exposes current paused state to external callers (IDOVE & Pausable override)
+    function paused() external view override(IDOVE, Pausable) returns (bool) {
+        return super.paused();
     }
     
     /**
@@ -671,16 +674,6 @@ contract DOVE is ERC20, Pausable, ReentrancyGuard, IDOVE, Ownable {
     /**
      * @dev Returns true if the contract is paused, false otherwise.
      * This overrides the Pausable.paused() function to also conform to IDOVE interface.
-     */
-    function paused() public view override(IDOVE, Pausable) returns (bool) {
-        return super.paused();
-    }
-    
-    /**
-     * @dev ERC20 _beforeTokenTransfer override
-     * @param from Address to deduct from
-     * @param to Recipient address
-     * @param amount Amount to transfer
      */
     function _beforeTokenTransfer(address from, address to, uint256 amount) internal override whenNotPaused {
         super._beforeTokenTransfer(from, to, amount);

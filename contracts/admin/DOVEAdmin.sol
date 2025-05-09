@@ -134,11 +134,8 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
 
     // ================ External Functions ================
     
-    /**
-     * @dev Launch the DOVE token (enable transfers)
-     * @notice Requires DEFAULT_ADMIN_ROLE
-     * @return True if launch is successful
-     */
+    /// @notice Launches the DOVE token by unpausing transfers after the timelock elapses.
+    /// @dev Returns true when the launch has executed, false when just scheduled.
     function launch() external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked returns (bool) {
         // Skip if token is not set or already launched (not paused)
         if (address(_doveToken) == address(0) || !_doveToken.paused()) {
@@ -168,23 +165,17 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
         return true;
     }
     
-    /**
-     * @dev Set charity wallet address
-     * @param newCharityWallet New charity wallet address
-     * @notice Requires FEE_MANAGER_ROLE
-     */
+    /// @notice Updates the charity wallet address that receives fee allocations.
+    /// @param newCharityWallet New charity wallet address.
     function setCharityWallet(address newCharityWallet) external nonReentrant onlyRole(FEE_MANAGER_ROLE) notLocked {
         require(address(_doveToken) != address(0), "Token address not set");
         require(newCharityWallet != address(0), "New charity wallet cannot be zero address");
         _doveToken.setCharityWallet(newCharityWallet);
     }
     
-    /**
-     * @dev Exclude or include an address from fees
-     * @param account Address to update
-     * @param excluded Whether to exclude from fees
-     * @notice Requires DEFAULT_ADMIN_ROLE or FEE_MANAGER_ROLE
-     */
+    /// @notice Adds or removes an address from fee-exemption list.
+    /// @param account Target address.
+    /// @param excluded True to exclude, false to include.
     function excludeFromFee(address account, bool excluded) external nonReentrant notLocked {
         require(
             hasRole(DEFAULT_ADMIN_ROLE, msg.sender) || 
@@ -196,51 +187,35 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
         _doveToken.setExcludedFromFee(account, excluded);
     }
     
-    /**
-     * @dev Set a DEX address status
-     * @param dexAddress Address to set status for
-     * @param dexStatus Whether the address is a DEX
-     * @notice Requires DEFAULT_ADMIN_ROLE
-     */
+    /// @notice Flags an address as Dex or non-Dex for fee logic.
+    /// @param dexAddress Address to flag.
+    /// @param dexStatus True if the address is a DEX pair/router.
     function setDexStatus(address dexAddress, bool dexStatus) external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked {
         require(address(_doveToken) != address(0), "Token address not set");
         require(dexAddress != address(0), "DEX address cannot be zero address");
         _doveToken.setDexStatus(dexAddress, dexStatus);
     }
     
-    /**
-     * @dev Disable early sell tax permanently (emergency function)
-     * @notice Requires EMERGENCY_ADMIN_ROLE
-     */
+    /// @notice Permanently disables early-sell tax (irreversible).
     function disableEarlySellTax() external nonReentrant onlyRole(EMERGENCY_ADMIN_ROLE) timelockRequired(DISABLE_EARLY_SELL_TAX_OP) {
         require(address(_doveToken) != address(0), "Token address not set");
         _doveToken.disableEarlySellTax();
     }
     
-    /**
-     * @dev Disable max transaction limit permanently
-     * @notice Requires DEFAULT_ADMIN_ROLE
-     */
+    /// @notice Permanently disables the max transaction limit.
     function disableMaxTxLimit() external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) notLocked timelockRequired(DISABLE_TX_LIMIT_OP) {
         require(address(_doveToken) != address(0), "Token address not set");
         _doveToken.disableMaxTxLimit();
     }
     
-    /**
-     * @dev Disable the max wallet limit
-     */
+    /// @notice Permanently disables the max wallet holding limit.
     function disableMaxWalletLimit() external nonReentrant notLocked timelockRequired(DISABLE_MAX_WALLET_LIMIT_OP) {
         require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Caller is not admin");
         _doveToken.disableMaxWalletLimit();
         emit MaxWalletLimitDisabled();
     }
 
-    /**
-     * @dev Initialise the secondary contracts for the DOVE token
-     * @param eventsContract Address of the events contract
-     * @param governanceContract Address of the governance contract
-     * @param infoContract Address of the info contract
-     */
+    /// @notice Sets addresses of secondary helper contracts post-deployment.
     function initialiseTokenContracts(
         address eventsContract,
         address governanceContract,
@@ -264,11 +239,8 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
         );
     }
     
-    /**
-     * @dev Sets the DOVE token address
-     * @param tokenAddress Address of the DOVE token
-     * @return bool Success indicator
-     */
+    /// @notice One-time setter to register the deployed DOVE token with the admin contract.
+    /// @param tokenAddress Address of the DOVE token contract.
     function setTokenAddress(address tokenAddress) external override nonReentrant notLocked returns (bool) {
         // Verify the token hasn't already been set
         require(address(_doveToken) == address(0), "Token address already set");
@@ -288,49 +260,36 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
         return true;
     }
     
-    /**
-     * @dev Pause all token transfers
-     * @notice Requires PAUSER_ROLE
-     */
+    /// @notice Pauses all token transfers (emergency only).
     function pause() external nonReentrant onlyRole(PAUSER_ROLE) {
         require(address(_doveToken) != address(0), "Token address not set");
         _doveToken.pause();
     }
     
-    /**
-     * @dev Unpause all token transfers
-     * @notice Requires PAUSER_ROLE
-     */
+    /// @notice Unpauses token transfers.
     function unpause() external nonReentrant onlyRole(PAUSER_ROLE) {
         require(address(_doveToken) != address(0), "Token address not set");
         _doveToken.unpause();
     }
     
-    /**
-     * @dev Enable security lockdown - emergency only
-     * @notice Requires EMERGENCY_ADMIN_ROLE
-     */
+    /// @notice Enables or disables full security-lockdown mode.
+    /// @param enabled True to enable, false to disable.
     function setSecurityLockdown(bool enabled) external nonReentrant onlyRole(EMERGENCY_ADMIN_ROLE) {
         _securityLockdown = enabled;
         emit SecurityLockdown(enabled);
     }
     
-    /**
-     * @dev Cancel a scheduled operation
-     * @param operationId ID of operation to cancel
-     * @notice Requires DEFAULT_ADMIN_ROLE
-     */
+    /// @notice Cancels a scheduled timelocked operation before execution.
+    /// @param operationId Operation identifier.
     function cancelOperation(bytes32 operationId) external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) {
         require(_operationTimelocks[operationId] != 0, "Operation not scheduled");
         delete _operationTimelocks[operationId];
         emit OperationCancelled(operationId);
     }
     
-    /**
-     * @dev Create a proposal to update the admin
-     * @param proposedAdmin Address of the proposed admin
-     * @return Proposal ID
-     */
+    /// @notice Governance calls to propose a new admin multisig address.
+    /// @param proposedAdmin New admin candidate.
+    /// @return proposalId Numeric ID of the proposal.
     function createAdminProposal(address proposedAdmin) external nonReentrant onlyRole(GOVERNANCE_ROLE) returns (uint256) {
         require(proposedAdmin != address(0), "Proposed admin cannot be zero address");
         
@@ -340,11 +299,8 @@ contract DOVEAdmin is AccessControl, ReentrancyGuard, IDOVEAdmin, IAdminGovHooks
         return proposalId;
     }
     
-    /**
-     * @dev Execute an admin proposal
-     * @param proposalId ID of the proposal to execute
-     * @return True if proposal is executed successfully
-     */
+    /// @notice Executes a previously approved admin proposal.
+    /// @param proposalId ID of the proposal to execute.
     function executeAdminProposal(uint256 proposalId) external nonReentrant onlyRole(GOVERNANCE_ROLE) returns (bool) {
         require(_adminProposals[proposalId].executed == false, "Proposal already executed");
         

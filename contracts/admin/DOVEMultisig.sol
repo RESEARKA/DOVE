@@ -72,9 +72,10 @@ contract DOVEMultisig is ReentrancyGuard, AccessControl {
         _grantRole(DEFAULT_ADMIN_ROLE, initialAdmin);
         
         // Add all initial approvers
-        for (uint256 i = 0; i < initialApprovers.length; i++) {
+        for (uint256 i = 0; i < initialApprovers.length; ) {
             require(initialApprovers[i] != address(0), "Approver cannot be zero address");
             _grantRole(APPROVER_ROLE, initialApprovers[i]);
+            unchecked { ++i; }
         }
         
         _roleCount[APPROVER_ROLE] = initialApprovers.length;
